@@ -10,13 +10,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -33,6 +36,11 @@ fun MotorControlScreen(
     motor2Status: String,
     motor3Status: String,
     motor4Status: String,
+    motor1Speed: Int,
+    motor2Speed: Int,
+    motor3Speed: Int,
+    motor4Speed: Int,
+    onSpeedChange: (motorId: Int, speed: Int) -> Unit,
     lastResponse: String,
     onMotorCommand: (motorId: Int, command: Int) -> Unit,
     onConnect: () -> Unit,
@@ -41,7 +49,8 @@ fun MotorControlScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
@@ -56,7 +65,9 @@ fun MotorControlScreen(
         MotorCard(
             motorName = "MOTOR 1",
             status = motor1Status,
+            speed = motor1Speed,
             isConnected = isConnected,
+            onSpeedChange = { onSpeedChange(1, it) },
             onReverse = { onMotorCommand(1, 2) },
             onStop = { onMotorCommand(1, 0) },
             onForward = { onMotorCommand(1, 1) }
@@ -68,7 +79,9 @@ fun MotorControlScreen(
         MotorCard(
             motorName = "MOTOR 2",
             status = motor2Status,
+            speed = motor2Speed,
             isConnected = isConnected,
+            onSpeedChange = { onSpeedChange(2, it) },
             onReverse = { onMotorCommand(2, 2) },
             onStop = { onMotorCommand(2, 0) },
             onForward = { onMotorCommand(2, 1) }
@@ -80,7 +93,9 @@ fun MotorControlScreen(
         MotorCard(
             motorName = "MOTOR 3",
             status = motor3Status,
+            speed = motor3Speed,
             isConnected = isConnected,
+            onSpeedChange = { onSpeedChange(3, it) },
             onReverse = { onMotorCommand(3, 2) },
             onStop = { onMotorCommand(3, 0) },
             onForward = { onMotorCommand(3, 1) }
@@ -92,7 +107,9 @@ fun MotorControlScreen(
         MotorCard(
             motorName = "MOTOR 4",
             status = motor4Status,
+            speed = motor4Speed,
             isConnected = isConnected,
+            onSpeedChange = { onSpeedChange(4, it) },
             onReverse = { onMotorCommand(4, 2) },
             onStop = { onMotorCommand(4, 0) },
             onForward = { onMotorCommand(4, 1) }
@@ -141,7 +158,9 @@ fun MotorControlScreen(
 private fun MotorCard(
     motorName: String,
     status: String,
+    speed: Int,
     isConnected: Boolean,
+    onSpeedChange: (Int) -> Unit,
     onReverse: () -> Unit,
     onStop: () -> Unit,
     onForward: () -> Unit
@@ -152,16 +171,53 @@ private fun MotorCard(
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                text = motorName,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = motorName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Speed Slider
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Speed:",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Slider(
+                    value = speed.toFloat(),
+                    onValueChange = { onSpeedChange(it.toInt()) },
+                    valueRange = 0f..255f,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 8.dp)
+                )
+                Text(
+                    text = speed.toString(),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.width(32.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -204,14 +260,6 @@ private fun MotorCard(
                     Text("FWD ▶")
                 }
             }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "Status: $status",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }

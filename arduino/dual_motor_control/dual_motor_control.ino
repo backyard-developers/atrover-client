@@ -1,8 +1,8 @@
 /*
- * Dual DC Motor Control via USB Serial
+ * Quad DC Motor Control via USB Serial
  * L293D Motor Shield 사용
  *
- * 프로토콜: <[모터ID][명령][체크섬]>
+ * 프로토콜: <[모터ID][명령][속도][체크섬]>
  * 응답: <[상태][모터ID][명령]>
  */
 
@@ -14,26 +14,19 @@ AF_DCMotor motor2(2);
 AF_DCMotor motor3(3);
 AF_DCMotor motor4(4);
 
-// 모터 속도 (0-255)
-const int MOTOR_SPEED = 255;
-
 // 프로토콜 상수
 const char STX = '<';
 const char ETX = '>';
 
 // 버퍼
-char buffer[5];
+char buffer[6];
 int bufferIndex = 0;
 bool receiving = false;
 
 void setup() {
   Serial.begin(9600);
 
-  // 모터 초기화
-  motor1.setSpeed(MOTOR_SPEED);
-  motor2.setSpeed(MOTOR_SPEED);
-  motor3.setSpeed(MOTOR_SPEED);
-  motor4.setSpeed(MOTOR_SPEED);
+  // 모터 초기화 (속도는 명령 시 설정)
   motor1.run(RELEASE);
   motor2.run(RELEASE);
   motor3.run(RELEASE);
@@ -54,24 +47,25 @@ void loop() {
       // 메시지 끝
       receiving = false;
       processCommand();
-    } else if (receiving && bufferIndex < 4) {
+    } else if (receiving && bufferIndex < 5) {
       buffer[bufferIndex++] = c;
     }
   }
 }
 
 void processCommand() {
-  if (bufferIndex != 3) {
+  if (bufferIndex != 4) {
     sendResponse('E', '0', '0');
     return;
   }
 
   char motorId = buffer[0];
   char command = buffer[1];
-  char checksum = buffer[2];
+  uint8_t speed = (uint8_t)buffer[2];
+  char checksum = buffer[3];
 
   // 체크섬 검증
-  char expectedChecksum = motorId ^ command;
+  char expectedChecksum = motorId ^ command ^ speed;
   if (checksum != expectedChecksum) {
     sendResponse('E', motorId, command);
     return;
@@ -97,6 +91,9 @@ void processCommand() {
     case '3': motor = &motor3; break;
     case '4': motor = &motor4; break;
   }
+
+  // 속도 설정
+  motor->setSpeed(speed);
 
   // 명령 실행
   switch (command) {

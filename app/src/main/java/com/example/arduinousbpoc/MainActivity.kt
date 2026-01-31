@@ -54,6 +54,10 @@ class MainActivity : ComponentActivity() {
     private var motor2Status by mutableStateOf("STOPPED")
     private var motor3Status by mutableStateOf("STOPPED")
     private var motor4Status by mutableStateOf("STOPPED")
+    private var motor1Speed by mutableStateOf(255)
+    private var motor2Speed by mutableStateOf(255)
+    private var motor3Speed by mutableStateOf(255)
+    private var motor4Speed by mutableStateOf(255)
     private var lastResponse by mutableStateOf("-")
 
     private val usbReceiver = object : BroadcastReceiver() {
@@ -116,6 +120,18 @@ class MainActivity : ComponentActivity() {
                     motor2Status = motor2Status,
                     motor3Status = motor3Status,
                     motor4Status = motor4Status,
+                    motor1Speed = motor1Speed,
+                    motor2Speed = motor2Speed,
+                    motor3Speed = motor3Speed,
+                    motor4Speed = motor4Speed,
+                    onSpeedChange = { motorId, speed ->
+                        when (motorId) {
+                            1 -> motor1Speed = speed
+                            2 -> motor2Speed = speed
+                            3 -> motor3Speed = speed
+                            4 -> motor4Speed = speed
+                        }
+                    },
                     lastResponse = lastResponse,
                     onMotorCommand = { motorId, command -> sendMotorCommand(motorId, command) }
                 )
@@ -220,14 +236,30 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        val speed = when (motorId) {
+            1 -> motor1Speed
+            2 -> motor2Speed
+            3 -> motor3Speed
+            4 -> motor4Speed
+            else -> 255
+        }
+
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val motorChar = motorId.toString()[0]
                 val cmdChar = command.toString()[0]
-                val checksum = (motorChar.code xor cmdChar.code).toChar()
+                val speedByte = speed.toByte()
+                val checksum = (motorChar.code xor cmdChar.code xor speed).toChar()
 
-                val message = "<$motorChar$cmdChar$checksum>"
-                usbSerialPort?.write(message.toByteArray(), 1000)
+                val message = byteArrayOf(
+                    '<'.code.toByte(),
+                    motorChar.code.toByte(),
+                    cmdChar.code.toByte(),
+                    speedByte,
+                    checksum.code.toByte(),
+                    '>'.code.toByte()
+                )
+                usbSerialPort?.write(message, 1000)
 
                 // 응답 대기
                 delay(50)
@@ -282,6 +314,11 @@ fun MainScreen(
     motor2Status: String,
     motor3Status: String,
     motor4Status: String,
+    motor1Speed: Int,
+    motor2Speed: Int,
+    motor3Speed: Int,
+    motor4Speed: Int,
+    onSpeedChange: (Int, Int) -> Unit,
     lastResponse: String,
     onMotorCommand: (Int, Int) -> Unit
 ) {
@@ -327,6 +364,11 @@ fun MainScreen(
                         motor2Status = motor2Status,
                         motor3Status = motor3Status,
                         motor4Status = motor4Status,
+                        motor1Speed = motor1Speed,
+                        motor2Speed = motor2Speed,
+                        motor3Speed = motor3Speed,
+                        motor4Speed = motor4Speed,
+                        onSpeedChange = onSpeedChange,
                         lastResponse = lastResponse,
                         onMotorCommand = onMotorCommand,
                         onConnect = onConnect
