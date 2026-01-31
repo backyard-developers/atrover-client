@@ -1,5 +1,9 @@
 # Arduino-Android Communication POC
 
+## 작업 규칙
+
+- **git push 금지**: 사용자의 명시적 허락 없이 절대 push하지 말 것. 커밋 후 "푸시할까요?" 확인 필수.
+
 ## 빌드 설정
 
 터미널에서 빌드 시 JAVA_HOME 설정 필요:
