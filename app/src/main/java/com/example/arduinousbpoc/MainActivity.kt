@@ -39,6 +39,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class MainActivity : ComponentActivity() {
 
@@ -58,7 +60,12 @@ class MainActivity : ComponentActivity() {
     private var motor2Speed by mutableStateOf(255)
     private var motor3Speed by mutableStateOf(255)
     private var motor4Speed by mutableStateOf(255)
+    private var motor1Command by mutableStateOf(0)  // 마지막 명령 저장
+    private var motor2Command by mutableStateOf(0)
+    private var motor3Command by mutableStateOf(0)
+    private var motor4Command by mutableStateOf(0)
     private var lastResponse by mutableStateOf("-")
+    private val usbMutex = Mutex()
 
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -126,10 +133,10 @@ class MainActivity : ComponentActivity() {
                     motor4Speed = motor4Speed,
                     onSpeedChange = { motorId, speed ->
                         when (motorId) {
-                            1 -> motor1Speed = speed
-                            2 -> motor2Speed = speed
-                            3 -> motor3Speed = speed
-                            4 -> motor4Speed = speed
+                            1 -> { motor1Speed = speed; sendMotorCommand(1, motor1Command) }
+                            2 -> { motor2Speed = speed; sendMotorCommand(2, motor2Command) }
+                            3 -> { motor3Speed = speed; sendMotorCommand(3, motor3Command) }
+                            4 -> { motor4Speed = speed; sendMotorCommand(4, motor4Command) }
                         }
                     },
                     lastResponse = lastResponse,
@@ -236,6 +243,14 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        // 마지막 명령 저장
+        when (motorId) {
+            1 -> motor1Command = command
+            2 -> motor2Command = command
+            3 -> motor3Command = command
+            4 -> motor4Command = command
+        }
+
         val speed = when (motorId) {
             1 -> motor1Speed
             2 -> motor2Speed
@@ -245,52 +260,54 @@ class MainActivity : ComponentActivity() {
         }
 
         CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val motorChar = motorId.toString()[0]
-                val cmdChar = command.toString()[0]
-                val speedByte = speed.toByte()
-                val checksum = (motorChar.code xor cmdChar.code xor speed).toChar()
+            usbMutex.withLock {
+                try {
+                    val motorChar = motorId.toString()[0]
+                    val cmdChar = command.toString()[0]
+                    val speedByte = speed.toByte()
+                    val checksum = (motorChar.code xor cmdChar.code xor speed).toChar()
 
-                val message = byteArrayOf(
-                    '<'.code.toByte(),
-                    motorChar.code.toByte(),
-                    cmdChar.code.toByte(),
-                    speedByte,
-                    checksum.code.toByte(),
-                    '>'.code.toByte()
-                )
-                usbSerialPort?.write(message, 1000)
+                    val message = byteArrayOf(
+                        '<'.code.toByte(),
+                        motorChar.code.toByte(),
+                        cmdChar.code.toByte(),
+                        speedByte,
+                        checksum.code.toByte(),
+                        '>'.code.toByte()
+                    )
+                    usbSerialPort?.write(message, 1000)
 
-                // 응답 대기
-                delay(50)
+                    // 응답 대기
+                    delay(50)
 
-                // 응답 읽기
-                val responseBuffer = ByteArray(20)
-                val bytesRead = usbSerialPort?.read(responseBuffer, 500) ?: 0
-                if (bytesRead > 0) {
-                    val response = String(responseBuffer, 0, bytesRead).trim()
-                    lastResponse = response
+                    // 응답 읽기
+                    val responseBuffer = ByteArray(20)
+                    val bytesRead = usbSerialPort?.read(responseBuffer, 500) ?: 0
+                    if (bytesRead > 0) {
+                        val response = String(responseBuffer, 0, bytesRead).trim()
+                        lastResponse = response
 
-                    if (response.contains("O")) {
-                        val statusText = when (command) {
-                            0 -> "STOPPED"
-                            1 -> "FORWARD"
-                            2 -> "BACKWARD"
-                            else -> "UNKNOWN"
+                        if (response.contains("O")) {
+                            val statusText = when (command) {
+                                0 -> "STOPPED"
+                                1 -> "FORWARD"
+                                2 -> "BACKWARD"
+                                else -> "UNKNOWN"
+                            }
+                            when (motorId) {
+                                1 -> motor1Status = statusText
+                                2 -> motor2Status = statusText
+                                3 -> motor3Status = statusText
+                                4 -> motor4Status = statusText
+                            }
                         }
-                        when (motorId) {
-                            1 -> motor1Status = statusText
-                            2 -> motor2Status = statusText
-                            3 -> motor3Status = statusText
-                            4 -> motor4Status = statusText
-                        }
+                    } else {
+                        lastResponse = "No response"
                     }
-                } else {
-                    lastResponse = "No response"
+                } catch (e: Exception) {
+                    connectionStatus = "전송 오류: ${e.message}"
+                    lastResponse = "Error: ${e.message}"
                 }
-            } catch (e: Exception) {
-                connectionStatus = "전송 오류: ${e.message}"
-                lastResponse = "Error: ${e.message}"
             }
         }
     }
