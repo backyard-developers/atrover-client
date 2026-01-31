@@ -12,28 +12,24 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
+import com.example.arduinousbpoc.screen.CameraPreviewScreen
+import com.example.arduinousbpoc.screen.CameraStreamScreen
+import com.example.arduinousbpoc.screen.LedControlScreen
 import com.example.arduinousbpoc.ui.theme.ArduinoUsbPocTheme
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
@@ -100,16 +96,13 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             ArduinoUsbPocTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    LedControlScreen(
-                        connectionStatus = connectionStatus,
-                        isConnected = isConnected,
-                        onLedOn = { sendCommand("1") },
-                        onLedOff = { sendCommand("0") },
-                        onConnect = { findAndConnectDevice() },
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                }
+                MainScreen(
+                    connectionStatus = connectionStatus,
+                    isConnected = isConnected,
+                    onLedOn = { sendCommand("1") },
+                    onLedOff = { sendCommand("0") },
+                    onConnect = { findAndConnectDevice() }
+                )
             }
         }
     }
@@ -199,80 +192,60 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+enum class TestTab(val title: String) {
+    LED_CONTROL("LED 제어"),
+    CAMERA_PREVIEW("카메라"),
+    CAMERA_STREAM("스트리밍")
+}
+
 @Composable
-fun LedControlScreen(
+fun MainScreen(
     connectionStatus: String,
     isConnected: Boolean,
     onLedOn: () -> Unit,
     onLedOff: () -> Unit,
-    onConnect: () -> Unit,
-    modifier: Modifier = Modifier
+    onConnect: () -> Unit
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(
-            text = "Arduino LED 제어",
-            style = MaterialTheme.typography.headlineMedium
-        )
+    var selectedTab by remember { mutableIntStateOf(0) }
+    val tabs = TestTab.entries
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = connectionStatus,
-            style = MaterialTheme.typography.bodyLarge,
-            color = if (isConnected) Color(0xFF4CAF50) else Color(0xFFFF5722)
-        )
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
+    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
         ) {
-            Button(
-                onClick = onLedOn,
-                enabled = isConnected,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF4CAF50)
-                ),
-                modifier = Modifier
-                    .weight(1f)
-                    .height(60.dp)
-            ) {
-                Text("LED ON", style = MaterialTheme.typography.titleMedium)
+            TabRow(selectedTabIndex = selectedTab) {
+                tabs.forEachIndexed { index, tab ->
+                    Tab(
+                        selected = selectedTab == index,
+                        onClick = { selectedTab = index },
+                        text = {
+                            Text(
+                                text = tab.title,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Button(
-                onClick = onLedOff,
-                enabled = isConnected,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFF44336)
-                ),
-                modifier = Modifier
-                    .weight(1f)
-                    .height(60.dp)
-            ) {
-                Text("LED OFF", style = MaterialTheme.typography.titleMedium)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        if (!isConnected) {
-            Button(
-                onClick = onConnect,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
-            ) {
-                Text("Arduino 연결")
+            when (tabs[selectedTab]) {
+                TestTab.LED_CONTROL -> {
+                    LedControlScreen(
+                        connectionStatus = connectionStatus,
+                        isConnected = isConnected,
+                        onLedOn = onLedOn,
+                        onLedOff = onLedOff,
+                        onConnect = onConnect
+                    )
+                }
+                TestTab.CAMERA_PREVIEW -> {
+                    CameraPreviewScreen()
+                }
+                TestTab.CAMERA_STREAM -> {
+                    CameraStreamScreen()
+                }
             }
         }
     }
