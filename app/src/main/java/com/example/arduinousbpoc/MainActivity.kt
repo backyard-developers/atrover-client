@@ -17,20 +17,28 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.example.arduinousbpoc.network.BackendConfig
+import com.example.arduinousbpoc.network.CommandSocketManager
+import com.example.arduinousbpoc.network.ConnectionState
+import com.example.arduinousbpoc.network.MediaSocketManager
+import com.example.arduinousbpoc.network.RoverCommand
+import com.example.arduinousbpoc.network.StreamingState
 import com.example.arduinousbpoc.screen.CameraPreviewScreen
 import com.example.arduinousbpoc.screen.CameraStreamScreen
 import com.example.arduinousbpoc.screen.LedControlScreen
 import com.example.arduinousbpoc.screen.MotorControlScreen
+import com.example.arduinousbpoc.screen.RemoteControlScreen
 import com.example.arduinousbpoc.ui.theme.ArduinoUsbPocTheme
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
@@ -60,12 +68,17 @@ class MainActivity : ComponentActivity() {
     private var motor2Speed by mutableStateOf(255)
     private var motor3Speed by mutableStateOf(255)
     private var motor4Speed by mutableStateOf(255)
-    private var motor1Command by mutableStateOf(0)  // 마지막 명령 저장
+    private var motor1Command by mutableStateOf(0)
     private var motor2Command by mutableStateOf(0)
     private var motor3Command by mutableStateOf(0)
     private var motor4Command by mutableStateOf(0)
     private var lastResponse by mutableStateOf("-")
     private val usbMutex = Mutex()
+
+    // Backend managers
+    private lateinit var commandSocketManager: CommandSocketManager
+    private lateinit var mediaSocketManager: MediaSocketManager
+    private var backendConfig: BackendConfig? = null
 
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -102,6 +115,12 @@ class MainActivity : ComponentActivity() {
 
         usbManager = getSystemService(USB_SERVICE) as UsbManager
 
+        // Initialize backend managers
+        commandSocketManager = CommandSocketManager(
+            onCommandReceived = { command -> handleRoverCommand(command) }
+        )
+        mediaSocketManager = MediaSocketManager()
+
         val filter = IntentFilter().apply {
             addAction(ACTION_USB_PERMISSION)
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
@@ -117,6 +136,12 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             ArduinoUsbPocTheme {
+                val cmdState by commandSocketManager.connectionState.collectAsState()
+                val mediaState by mediaSocketManager.connectionState.collectAsState()
+                val streamState by mediaSocketManager.streamingState.collectAsState()
+                val roverId by commandSocketManager.roverId.collectAsState()
+                val lastCmd by commandSocketManager.lastCommand.collectAsState()
+
                 MainScreen(
                     connectionStatus = connectionStatus,
                     isConnected = isConnected,
@@ -140,7 +165,34 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     lastResponse = lastResponse,
-                    onMotorCommand = { motorId, command -> sendMotorCommand(motorId, command) }
+                    onMotorCommand = { motorId, command -> sendMotorCommand(motorId, command) },
+                    // Remote control props
+                    commandConnectionState = cmdState,
+                    mediaConnectionState = mediaState,
+                    streamingState = streamState,
+                    roverId = roverId,
+                    lastCommand = lastCmd,
+                    onBackendConnect = { ip, cmdPort, mdPort, name ->
+                        val config = BackendConfig(ip, cmdPort, mdPort, name)
+                        backendConfig = config
+                        commandSocketManager.connect(config)
+                    },
+                    onBackendDisconnect = {
+                        mediaSocketManager.disconnect()
+                        commandSocketManager.disconnect()
+                        backendConfig = null
+                    },
+                    onStartStreaming = {
+                        val id = commandSocketManager.roverId.value
+                        val cfg = backendConfig
+                        if (id != null && cfg != null) {
+                            mediaSocketManager.connect(cfg, id)
+                            mediaSocketManager.startStreaming(this@MainActivity, this@MainActivity)
+                        }
+                    },
+                    onStopStreaming = {
+                        mediaSocketManager.disconnect()
+                    }
                 )
             }
         }
@@ -148,8 +200,89 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        commandSocketManager.destroy()
+        mediaSocketManager.destroy()
         disconnect()
         unregisterReceiver(usbReceiver)
+    }
+
+    /**
+     * Convert backend RoverCommand to USB motor commands.
+     * Motor layout (4WD):
+     *   Motor 1,3 = left side
+     *   Motor 2,4 = right side
+     * Command: 0=stop, 1=forward, 2=backward
+     */
+    private fun handleRoverCommand(command: RoverCommand) {
+        // Convert speed 0-100 to 0-255
+        val speedValue = ((command.speed ?: 50) * 2.55).toInt().coerceIn(0, 255)
+
+        // Set all motor speeds
+        motor1Speed = speedValue
+        motor2Speed = speedValue
+        motor3Speed = speedValue
+        motor4Speed = speedValue
+
+        when (command.action) {
+            "move" -> {
+                when (command.direction) {
+                    "forward" -> {
+                        sendMotorCommand(1, 1)
+                        sendMotorCommand(2, 1)
+                        sendMotorCommand(3, 1)
+                        sendMotorCommand(4, 1)
+                    }
+                    "backward" -> {
+                        sendMotorCommand(1, 2)
+                        sendMotorCommand(2, 2)
+                        sendMotorCommand(3, 2)
+                        sendMotorCommand(4, 2)
+                    }
+                    "left" -> {
+                        // Left side backward, right side forward
+                        sendMotorCommand(1, 2)
+                        sendMotorCommand(3, 2)
+                        sendMotorCommand(2, 1)
+                        sendMotorCommand(4, 1)
+                    }
+                    "right" -> {
+                        // Left side forward, right side backward
+                        sendMotorCommand(1, 1)
+                        sendMotorCommand(3, 1)
+                        sendMotorCommand(2, 2)
+                        sendMotorCommand(4, 2)
+                    }
+                }
+            }
+            "stop" -> {
+                sendMotorCommand(1, 0)
+                sendMotorCommand(2, 0)
+                sendMotorCommand(3, 0)
+                sendMotorCommand(4, 0)
+            }
+            "rotate" -> {
+                val degrees = command.degrees ?: 90
+                if (degrees > 0) {
+                    // Rotate right: left forward, right backward
+                    sendMotorCommand(1, 1)
+                    sendMotorCommand(3, 1)
+                    sendMotorCommand(2, 2)
+                    sendMotorCommand(4, 2)
+                } else {
+                    // Rotate left: left backward, right forward
+                    sendMotorCommand(1, 2)
+                    sendMotorCommand(3, 2)
+                    sendMotorCommand(2, 1)
+                    sendMotorCommand(4, 1)
+                }
+            }
+            "calibrate" -> {
+                sendMotorCommand(1, 0)
+                sendMotorCommand(2, 0)
+                sendMotorCommand(3, 0)
+                sendMotorCommand(4, 0)
+            }
+        }
     }
 
     private fun findAndConnectDevice() {
@@ -343,7 +476,8 @@ enum class TestTab(val title: String) {
     LED_CONTROL("LED"),
     MOTOR_CONTROL("모터"),
     CAMERA_PREVIEW("카메라"),
-    CAMERA_STREAM("스트리밍")
+    CAMERA_STREAM("스트리밍"),
+    REMOTE_CONTROL("원격")
 }
 
 @Composable
@@ -363,7 +497,17 @@ fun MainScreen(
     motor4Speed: Int,
     onSpeedChange: (Int, Int) -> Unit,
     lastResponse: String,
-    onMotorCommand: (Int, Int) -> Unit
+    onMotorCommand: (Int, Int) -> Unit,
+    // Remote control props
+    commandConnectionState: ConnectionState,
+    mediaConnectionState: ConnectionState,
+    streamingState: StreamingState,
+    roverId: String?,
+    lastCommand: String?,
+    onBackendConnect: (String, Int, Int, String) -> Unit,
+    onBackendDisconnect: () -> Unit,
+    onStartStreaming: () -> Unit,
+    onStopStreaming: () -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = TestTab.entries
@@ -374,7 +518,7 @@ fun MainScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            TabRow(selectedTabIndex = selectedTab) {
+            ScrollableTabRow(selectedTabIndex = selectedTab) {
                 tabs.forEachIndexed { index, tab ->
                     Tab(
                         selected = selectedTab == index,
@@ -422,6 +566,21 @@ fun MainScreen(
                 }
                 TestTab.CAMERA_STREAM -> {
                     CameraStreamScreen()
+                }
+                TestTab.REMOTE_CONTROL -> {
+                    RemoteControlScreen(
+                        commandConnectionState = commandConnectionState,
+                        mediaConnectionState = mediaConnectionState,
+                        streamingState = streamingState,
+                        roverId = roverId,
+                        lastCommand = lastCommand,
+                        usbConnectionStatus = connectionStatus,
+                        isUsbConnected = isConnected,
+                        onConnect = onBackendConnect,
+                        onDisconnect = onBackendDisconnect,
+                        onStartStreaming = onStartStreaming,
+                        onStopStreaming = onStopStreaming
+                    )
                 }
             }
         }
