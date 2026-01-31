@@ -35,6 +35,7 @@ fun RemoteControlScreen(
     onDisconnect: () -> Unit,
     onStartStreaming: () -> Unit,
     onStopStreaming: () -> Unit,
+    errorLog: String = "",
     modifier: Modifier = Modifier
 ) {
     var serverIp by remember { mutableStateOf("192.168.0.2") }
@@ -185,6 +186,23 @@ fun RemoteControlScreen(
             Text(
                 text = "스트리밍: ${streamingState.name}",
                 style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        // --- Error log ---
+        if (errorLog.isNotBlank()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = errorLog,
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFF44336),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Color(0xFFF44336).copy(alpha = 0.1f),
+                        RoundedCornerShape(8.dp)
+                    )
+                    .padding(8.dp)
             )
         }
 

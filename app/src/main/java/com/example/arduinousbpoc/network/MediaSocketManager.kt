@@ -42,6 +42,9 @@ class MediaSocketManager {
     private val _isRegistered = MutableStateFlow(false)
     val isRegistered: StateFlow<Boolean> = _isRegistered
 
+    private val _errorLog = MutableStateFlow<String?>(null)
+    val errorLog: StateFlow<String?> = _errorLog
+
     private var webSocket: WebSocket? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var imageAnalysis: ImageAnalysis? = null
@@ -101,8 +104,11 @@ class MediaSocketManager {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "Media connection failed", t)
-                _connectionState.value = ConnectionState.Error
-                _streamingState.value = StreamingState.Error
+                mainHandler.post {
+                    _connectionState.value = ConnectionState.Error
+                    _streamingState.value = StreamingState.Error
+                    _errorLog.value = "Media 연결 실패: ${t.message}"
+                }
             }
         })
     }
@@ -126,6 +132,7 @@ class MediaSocketManager {
                 "error" -> {
                     Log.e(TAG, "Media server error: $text")
                     _streamingState.value = StreamingState.Error
+                    _errorLog.value = "Media error: $text"
                 }
                 "start_stream" -> {
                     Log.d(TAG, "Start stream requested")

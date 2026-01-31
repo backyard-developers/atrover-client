@@ -141,6 +141,17 @@ class MainActivity : ComponentActivity() {
                 val streamState by mediaSocketManager.streamingState.collectAsState()
                 val roverId by commandSocketManager.roverId.collectAsState()
                 val lastCmd by commandSocketManager.lastCommand.collectAsState()
+                val cmdError by commandSocketManager.errorLog.collectAsState()
+                val mediaError by mediaSocketManager.errorLog.collectAsState()
+
+                // Auto-connect media server when command server registers
+                androidx.compose.runtime.LaunchedEffect(roverId) {
+                    val id = roverId
+                    val cfg = backendConfig
+                    if (id != null && cfg != null && mediaState == ConnectionState.Disconnected) {
+                        mediaSocketManager.connect(cfg, id)
+                    }
+                }
 
                 MainScreen(
                     connectionStatus = connectionStatus,
@@ -192,7 +203,8 @@ class MainActivity : ComponentActivity() {
                     },
                     onStopStreaming = {
                         mediaSocketManager.disconnect()
-                    }
+                    },
+                    errorLog = listOfNotNull(cmdError, mediaError).joinToString("\n")
                 )
             }
         }
@@ -213,133 +225,55 @@ class MainActivity : ComponentActivity() {
      *   Motor 2,4 = right side
      * Command: 0=stop, 1=forward, 2=backward
      */
+    /**
+     * Convert backend RoverCommand to USB motor commands.
+     * 2WD layout: Motor 3 = left, Motor 4 = right
+     * Command: 0=stop, 1=forward, 2=backward
+     */
     private fun handleRoverCommand(command: RoverCommand) {
         // Convert speed 0-100 to 0-255
         val speedValue = ((command.speed ?: 50) * 2.55).toInt().coerceIn(0, 255)
 
-        // Set all motor speeds
-        motor1Speed = speedValue
-        motor2Speed = speedValue
         motor3Speed = speedValue
         motor4Speed = speedValue
 
-        val commands: List<Pair<Int, Int>> = when (command.action) {
-            "move" -> when (command.direction) {
-                "forward" -> listOf(1 to 1, 2 to 1, 3 to 1, 4 to 1)
-                "backward" -> listOf(1 to 2, 2 to 2, 3 to 2, 4 to 2)
-                "left" -> listOf(1 to 2, 3 to 2, 2 to 1, 4 to 1)
-                "right" -> listOf(1 to 1, 3 to 1, 2 to 2, 4 to 2)
-                else -> return
+        when (command.action) {
+            "move" -> {
+                when (command.direction) {
+                    "forward" -> {
+                        sendMotorCommand(3, 1)
+                        sendMotorCommand(4, 1)
+                    }
+                    "backward" -> {
+                        sendMotorCommand(3, 2)
+                        sendMotorCommand(4, 2)
+                    }
+                    "left" -> {
+                        // Left motor backward, right motor forward
+                        sendMotorCommand(3, 2)
+                        sendMotorCommand(4, 1)
+                    }
+                    "right" -> {
+                        // Left motor forward, right motor backward
+                        sendMotorCommand(3, 1)
+                        sendMotorCommand(4, 2)
+                    }
+                }
             }
-            "stop", "calibrate" -> listOf(1 to 0, 2 to 0, 3 to 0, 4 to 0)
+            "stop", "calibrate" -> {
+                sendMotorCommand(3, 0)
+                sendMotorCommand(4, 0)
+            }
             "rotate" -> {
                 val degrees = command.degrees ?: 90
-                if (degrees > 0) listOf(1 to 1, 3 to 1, 2 to 2, 4 to 2)
-                else listOf(1 to 2, 3 to 2, 2 to 1, 4 to 1)
-            }
-            else -> return
-        }
-
-        sendMotorCommandBatch(commands)
-    }
-
-    /**
-     * Send multiple motor commands in a single batch:
-     * write all messages, then one delay, then read all responses.
-     */
-    private fun sendMotorCommandBatch(commands: List<Pair<Int, Int>>) {
-        if (!isConnected || usbSerialPort == null) {
-            connectionStatus = "연결되지 않음"
-            return
-        }
-
-        for ((motorId, cmd) in commands) {
-            when (motorId) {
-                1 -> motor1Command = cmd
-                2 -> motor2Command = cmd
-                3 -> motor3Command = cmd
-                4 -> motor4Command = cmd
-            }
-        }
-
-        CoroutineScope(Dispatchers.IO).launch {
-            usbMutex.withLock {
-                try {
-                    val port = usbSerialPort ?: return@withLock
-
-                    // Write all commands
-                    for ((motorId, cmd) in commands) {
-                        val speed = when (motorId) {
-                            1 -> motor1Speed
-                            2 -> motor2Speed
-                            3 -> motor3Speed
-                            4 -> motor4Speed
-                            else -> 255
-                        }
-
-                        val motorChar = motorId.toString()[0]
-                        val cmdChar = cmd.toString()[0]
-                        val speedByte = speed.toByte()
-                        val checksum = (motorChar.code xor cmdChar.code xor speed).toChar()
-
-                        val message = byteArrayOf(
-                            '<'.code.toByte(),
-                            motorChar.code.toByte(),
-                            cmdChar.code.toByte(),
-                            speedByte,
-                            checksum.code.toByte(),
-                            '>'.code.toByte()
-                        )
-
-                        try {
-                            port.write(message, 1000)
-                        } catch (e: Exception) {
-                            lastResponse = "Error"
-                            if (e.message?.contains("write") == true) {
-                                isConnected = false
-                                connectionStatus = "연결 끊김"
-                            }
-                            return@withLock
-                        }
-                    }
-
-                    // Single delay after all writes
-                    delay(30)
-
-                    // Read all available responses
-                    val responseBuffer = ByteArray(64)
-                    val bytesRead = try {
-                        port.read(responseBuffer, 200)
-                    } catch (e: Exception) {
-                        0
-                    }
-
-                    if (bytesRead > 0) {
-                        val response = String(responseBuffer, 0, bytesRead).trim()
-                        lastResponse = response
-
-                        // Update statuses based on commands sent
-                        for ((motorId, cmd) in commands) {
-                            val statusText = when (cmd) {
-                                0 -> "STOPPED"
-                                1 -> "FORWARD"
-                                2 -> "BACKWARD"
-                                else -> "UNKNOWN"
-                            }
-                            when (motorId) {
-                                1 -> motor1Status = statusText
-                                2 -> motor2Status = statusText
-                                3 -> motor3Status = statusText
-                                4 -> motor4Status = statusText
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    lastResponse = "Error"
-                    if (e.message?.contains("write") == true) {
-                        isConnected = false
-                        connectionStatus = "연결 끊김"
-                    }
+                if (degrees > 0) {
+                    // Rotate right: left forward, right backward
+                    sendMotorCommand(3, 1)
+                    sendMotorCommand(4, 2)
+                } else {
+                    // Rotate left: left backward, right forward
+                    sendMotorCommand(3, 2)
+                    sendMotorCommand(4, 1)
                 }
             }
         }
@@ -567,7 +501,8 @@ fun MainScreen(
     onBackendConnect: (String, Int, Int, String) -> Unit,
     onBackendDisconnect: () -> Unit,
     onStartStreaming: () -> Unit,
-    onStopStreaming: () -> Unit
+    onStopStreaming: () -> Unit,
+    errorLog: String
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = TestTab.entries
@@ -639,7 +574,8 @@ fun MainScreen(
                         onConnect = onBackendConnect,
                         onDisconnect = onBackendDisconnect,
                         onStartStreaming = onStartStreaming,
-                        onStopStreaming = onStopStreaming
+                        onStopStreaming = onStopStreaming,
+                        errorLog = errorLog
                     )
                 }
             }

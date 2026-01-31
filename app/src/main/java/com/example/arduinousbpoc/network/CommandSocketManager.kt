@@ -29,6 +29,9 @@ class CommandSocketManager(
     private val _lastCommand = MutableStateFlow<String?>(null)
     val lastCommand: StateFlow<String?> = _lastCommand
 
+    private val _errorLog = MutableStateFlow<String?>(null)
+    val errorLog: StateFlow<String?> = _errorLog
+
     private var webSocket: WebSocket? = null
     private var heartbeatJob: Job? = null
     private var reconnectJob: Job? = null
@@ -94,7 +97,10 @@ class CommandSocketManager(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "Connection failed", t)
-                mainHandler.post { _connectionState.value = ConnectionState.Error }
+                mainHandler.post {
+                    _connectionState.value = ConnectionState.Error
+                    _errorLog.value = "CMD 연결 실패: ${t.message}"
+                }
                 stopHeartbeat()
                 scheduleReconnect()
             }
@@ -118,6 +124,7 @@ class CommandSocketManager(
                 }
                 "error" -> {
                     Log.e(TAG, "Server error: $text")
+                    _errorLog.value = "CMD error: $text"
                 }
                 "command" -> {
                     // Server sends RoverCommand directly (not wrapped in CommandMessage)
