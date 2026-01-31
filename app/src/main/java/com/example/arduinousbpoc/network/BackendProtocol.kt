@@ -68,8 +68,7 @@ data class TelemetryMessage(
 @Serializable
 data class MediaRegisterMessage(
     val type: String = "register",
-    val roverId: String,
-    val role: String = "rover"
+    val roverId: String
 )
 
 @Serializable

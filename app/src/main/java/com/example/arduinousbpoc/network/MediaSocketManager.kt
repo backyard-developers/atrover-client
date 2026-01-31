@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -37,6 +39,9 @@ class MediaSocketManager {
     private val _connectionState = MutableStateFlow(ConnectionState.Disconnected)
     val connectionState: StateFlow<ConnectionState> = _connectionState
 
+    private val _isRegistered = MutableStateFlow(false)
+    val isRegistered: StateFlow<Boolean> = _isRegistered
+
     private var webSocket: WebSocket? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var imageAnalysis: ImageAnalysis? = null
@@ -44,6 +49,12 @@ class MediaSocketManager {
     private var lastFrameTime = 0L
     private var jpegQuality = 50
     private val frameIntervalMs = 66L // ~15fps
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    // Deferred streaming: context/lifecycle saved to start after registered
+    private var pendingStreamContext: Context? = null
+    private var pendingStreamLifecycle: LifecycleOwner? = null
 
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -75,7 +86,7 @@ class MediaSocketManager {
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 Log.d(TAG, "Media message: $text")
-                handleMessage(text)
+                mainHandler.post { handleMessage(text) }
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -100,6 +111,22 @@ class MediaSocketManager {
         try {
             val envelope = backendJson.decodeFromString(MessageEnvelope.serializer(), text)
             when (envelope.type) {
+                "registered" -> {
+                    Log.d(TAG, "Media server registered successfully")
+                    _isRegistered.value = true
+                    // Start deferred streaming if requested before registration
+                    val ctx = pendingStreamContext
+                    val lifecycle = pendingStreamLifecycle
+                    if (ctx != null && lifecycle != null) {
+                        pendingStreamContext = null
+                        pendingStreamLifecycle = null
+                        doStartStreaming(ctx, lifecycle)
+                    }
+                }
+                "error" -> {
+                    Log.e(TAG, "Media server error: $text")
+                    _streamingState.value = StreamingState.Error
+                }
                 "start_stream" -> {
                     Log.d(TAG, "Start stream requested")
                     _streamingState.value = StreamingState.Streaming
@@ -115,6 +142,17 @@ class MediaSocketManager {
     }
 
     fun startStreaming(context: Context, lifecycleOwner: LifecycleOwner) {
+        if (_isRegistered.value) {
+            doStartStreaming(context, lifecycleOwner)
+        } else {
+            // Defer until registered response
+            Log.d(TAG, "Deferring streaming start until registered")
+            pendingStreamContext = context
+            pendingStreamLifecycle = lifecycleOwner
+        }
+    }
+
+    private fun doStartStreaming(context: Context, lifecycleOwner: LifecycleOwner) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
             cameraProvider = cameraProviderFuture.get()
@@ -223,6 +261,9 @@ class MediaSocketManager {
         webSocket?.close(1000, "User disconnected")
         webSocket = null
         _connectionState.value = ConnectionState.Disconnected
+        _isRegistered.value = false
+        pendingStreamContext = null
+        pendingStreamLifecycle = null
     }
 
     fun destroy() {
