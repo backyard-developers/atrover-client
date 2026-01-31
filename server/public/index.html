@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Camera Test</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 20px; color: #4ecca3; }
+
+        .status-bar {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .status-item {
+            padding: 10px 20px;
+            border-radius: 8px;
+            background: #16213e;
+        }
+        .status-item.connected { border-left: 4px solid #4ecca3; }
+        .status-item.disconnected { border-left: 4px solid #ff6b6b; }
+
+        .video-container {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        .video-box {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+        }
+        .video-box h3 { margin-bottom: 10px; color: #4ecca3; }
+        video {
+            width: 480px;
+            height: 360px;
+            background: #000;
+            border-radius: 8px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        button:hover { transform: translateY(-2px); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-primary { background: #4ecca3; color: #1a1a2e; }
+        .btn-danger { background: #ff6b6b; color: #fff; }
+        .btn-secondary { background: #16213e; color: #eee; border: 1px solid #4ecca3; }
+
+        .clients-list {
+            margin-top: 20px;
+            padding: 15px;
+            background: #16213e;
+            border-radius: 8px;
+        }
+        .clients-list h3 { margin-bottom: 10px; }
+        .client-item {
+            padding: 8px 12px;
+            margin: 5px 0;
+            background: #1a1a2e;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .client-item.android { border-left: 3px solid #3ddc84; }
+        .client-item.web { border-left: 3px solid #4285f4; }
+
+        .log {
+            margin-top: 20px;
+            padding: 15px;
+            background: #0f0f1a;
+            border-radius: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .log-entry { padding: 2px 0; }
+        .log-entry.info { color: #4ecca3; }
+        .log-entry.error { color: #ff6b6b; }
+        .log-entry.warn { color: #feca57; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebRTC Camera Test</h1>
+
+        <div class="status-bar">
+            <div id="wsStatus" class="status-item disconnected">
+                WebSocket: 연결 안됨
+            </div>
+            <div id="rtcStatus" class="status-item disconnected">
+                WebRTC: 연결 안됨
+            </div>
+            <div id="myId" class="status-item">
+                내 ID: -
+            </div>
+        </div>
+
+        <div class="video-container">
+            <div class="video-box">
+                <h3>수신 영상 (Android)</h3>
+                <video id="remoteVideo" autoplay playsinline></video>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="connectBtn" class="btn-primary">서버 연결</button>
+            <button id="disconnectBtn" class="btn-danger" disabled>연결 해제</button>
+        </div>
+
+        <div class="clients-list">
+            <h3>연결된 클라이언트</h3>
+            <div id="clientsList"></div>
+        </div>
+
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let pc = null;
+        let myId = null;
+
+        const wsStatus = document.getElementById('wsStatus');
+        const rtcStatus = document.getElementById('rtcStatus');
+        const myIdEl = document.getElementById('myId');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const clientsList = document.getElementById('clientsList');
+        const logEl = document.getElementById('log');
+
+        const config = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
+
+        function log(msg, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+            console.log(msg);
+        }
+
+        function updateWsStatus(connected) {
+            wsStatus.textContent = `WebSocket: ${connected ? '연결됨' : '연결 안됨'}`;
+            wsStatus.className = `status-item ${connected ? 'connected' : 'disconnected'}`;
+            connectBtn.disabled = connected;
+            disconnectBtn.disabled = !connected;
+        }
+
+        function updateRtcStatus(state) {
+            rtcStatus.textContent = `WebRTC: ${state}`;
+            rtcStatus.className = `status-item ${state === 'connected' ? 'connected' : 'disconnected'}`;
+        }
+
+        function connect() {
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${location.host}`;
+
+            log(`Connecting to ${wsUrl}...`);
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                log('WebSocket connected');
+                updateWsStatus(true);
+                ws.send(JSON.stringify({ type: 'register', clientType: 'web' }));
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                handleMessage(message);
+            };
+
+            ws.onclose = () => {
+                log('WebSocket disconnected', 'warn');
+                updateWsStatus(false);
+                cleanup();
+            };
+
+            ws.onerror = (error) => {
+                log('WebSocket error', 'error');
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            cleanup();
+        }
+
+        function cleanup() {
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+            remoteVideo.srcObject = null;
+            updateRtcStatus('연결 안됨');
+        }
+
+        function handleMessage(message) {
+            switch (message.type) {
+                case 'id':
+                    myId = message.id;
+                    myIdEl.textContent = `내 ID: ${myId}`;
+                    log(`My ID: ${myId}`);
+                    break;
+
+                case 'client-list':
+                    updateClientsList(message.clients);
+                    break;
+
+                case 'offer':
+                    log(`Received offer from ${message.from}`);
+                    handleOffer(message);
+                    break;
+
+                case 'answer':
+                    log(`Received answer from ${message.from}`);
+                    handleAnswer(message);
+                    break;
+
+                case 'ice-candidate':
+                    log(`Received ICE candidate from ${message.from}`);
+                    handleIceCandidate(message);
+                    break;
+            }
+        }
+
+        function updateClientsList(clients) {
+            clientsList.innerHTML = '';
+            clients.forEach(client => {
+                if (client.id === myId) return;
+                const div = document.createElement('div');
+                div.className = `client-item ${client.type || 'unknown'}`;
+                div.innerHTML = `
+                    <span>${client.id} (${client.type || 'unknown'})</span>
+                    ${client.type === 'android' ? '<button class="btn-secondary" onclick="requestStream(\'' + client.id + '\')">스트림 요청</button>' : ''}
+                `;
+                clientsList.appendChild(div);
+            });
+            if (clientsList.children.length === 0) {
+                clientsList.innerHTML = '<div class="client-item">다른 클라이언트 없음</div>';
+            }
+        }
+
+        function createPeerConnection() {
+            pc = new RTCPeerConnection(config);
+
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({
+                        type: 'ice-candidate',
+                        candidate: event.candidate
+                    }));
+                }
+            };
+
+            pc.ontrack = (event) => {
+                log('Received remote track');
+                remoteVideo.srcObject = event.streams[0];
+            };
+
+            pc.onconnectionstatechange = () => {
+                log(`Connection state: ${pc.connectionState}`);
+                updateRtcStatus(pc.connectionState);
+            };
+
+            pc.oniceconnectionstatechange = () => {
+                log(`ICE state: ${pc.iceConnectionState}`);
+            };
+        }
+
+        async function requestStream(targetId) {
+            log(`Requesting stream from ${targetId}`);
+            createPeerConnection();
+
+            // Create offer
+            const offer = await pc.createOffer({
+                offerToReceiveVideo: true,
+                offerToReceiveAudio: false
+            });
+            await pc.setLocalDescription(offer);
+
+            ws.send(JSON.stringify({
+                type: 'offer',
+                target: targetId,
+                sdp: offer.sdp
+            }));
+        }
+
+        async function handleOffer(message) {
+            createPeerConnection();
+
+            await pc.setRemoteDescription(new RTCSessionDescription({
+                type: 'offer',
+                sdp: message.sdp
+            }));
+
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+
+            ws.send(JSON.stringify({
+                type: 'answer',
+                target: message.from,
+                sdp: answer.sdp
+            }));
+        }
+
+        async function handleAnswer(message) {
+            await pc.setRemoteDescription(new RTCSessionDescription({
+                type: 'answer',
+                sdp: message.sdp
+            }));
+        }
+
+        async function handleIceCandidate(message) {
+            if (pc && message.candidate) {
+                await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
+            }
+        }
+
+        connectBtn.addEventListener('click', connect);
+        disconnectBtn.addEventListener('click', disconnect);
+
+        // Auto-connect on load
+        connect();
+    </script>
+</body>
+</html>
