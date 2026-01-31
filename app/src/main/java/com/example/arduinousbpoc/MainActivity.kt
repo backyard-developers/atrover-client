@@ -30,10 +30,15 @@ import androidx.compose.ui.Modifier
 import com.example.arduinousbpoc.screen.CameraPreviewScreen
 import com.example.arduinousbpoc.screen.CameraStreamScreen
 import com.example.arduinousbpoc.screen.LedControlScreen
+import com.example.arduinousbpoc.screen.MotorControlScreen
 import com.example.arduinousbpoc.ui.theme.ArduinoUsbPocTheme
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
 
@@ -45,6 +50,9 @@ class MainActivity : ComponentActivity() {
     private var usbSerialPort: UsbSerialPort? = null
     private var connectionStatus by mutableStateOf("연결 안됨")
     private var isConnected by mutableStateOf(false)
+    private var motor1Status by mutableStateOf("STOPPED")
+    private var motor2Status by mutableStateOf("STOPPED")
+    private var lastResponse by mutableStateOf("-")
 
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -101,7 +109,11 @@ class MainActivity : ComponentActivity() {
                     isConnected = isConnected,
                     onLedOn = { sendCommand("1") },
                     onLedOff = { sendCommand("0") },
-                    onConnect = { findAndConnectDevice() }
+                    onConnect = { findAndConnectDevice() },
+                    motor1Status = motor1Status,
+                    motor2Status = motor2Status,
+                    lastResponse = lastResponse,
+                    onMotorCommand = { motorId, command -> sendMotorCommand(motorId, command) }
                 )
             }
         }
@@ -162,8 +174,15 @@ class MainActivity : ComponentActivity() {
                 UsbSerialPort.STOPBITS_1,
                 UsbSerialPort.PARITY_NONE
             )
+            usbSerialPort?.dtr = true
+            usbSerialPort?.rts = true
             isConnected = true
             connectionStatus = "연결됨: ${device.productName ?: "Arduino"}"
+
+            // 아두이노 리셋 대기
+            CoroutineScope(Dispatchers.IO).launch {
+                delay(2000)
+            }
         } catch (e: Exception) {
             connectionStatus = "연결 오류: ${e.message}"
             isConnected = false
@@ -190,10 +209,56 @@ class MainActivity : ComponentActivity() {
             connectionStatus = "전송 오류: ${e.message}"
         }
     }
+
+    private fun sendMotorCommand(motorId: Int, command: Int) {
+        if (!isConnected || usbSerialPort == null) {
+            connectionStatus = "연결되지 않음"
+            return
+        }
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val motorChar = motorId.toString()[0]
+                val cmdChar = command.toString()[0]
+                val checksum = (motorChar.code xor cmdChar.code).toChar()
+
+                val message = "<$motorChar$cmdChar$checksum>"
+                usbSerialPort?.write(message.toByteArray(), 1000)
+
+                // 응답 대기
+                delay(50)
+
+                // 응답 읽기
+                val responseBuffer = ByteArray(20)
+                val bytesRead = usbSerialPort?.read(responseBuffer, 500) ?: 0
+                if (bytesRead > 0) {
+                    val response = String(responseBuffer, 0, bytesRead).trim()
+                    lastResponse = response
+
+                    if (response.contains("O")) {
+                        val statusText = when (command) {
+                            0 -> "STOPPED"
+                            1 -> "FORWARD"
+                            2 -> "BACKWARD"
+                            else -> "UNKNOWN"
+                        }
+                        if (motorId == 1) motor1Status = statusText
+                        else motor2Status = statusText
+                    }
+                } else {
+                    lastResponse = "No response"
+                }
+            } catch (e: Exception) {
+                connectionStatus = "전송 오류: ${e.message}"
+                lastResponse = "Error: ${e.message}"
+            }
+        }
+    }
 }
 
 enum class TestTab(val title: String) {
-    LED_CONTROL("LED 제어"),
+    LED_CONTROL("LED"),
+    MOTOR_CONTROL("모터"),
     CAMERA_PREVIEW("카메라"),
     CAMERA_STREAM("스트리밍")
 }
@@ -204,7 +269,11 @@ fun MainScreen(
     isConnected: Boolean,
     onLedOn: () -> Unit,
     onLedOff: () -> Unit,
-    onConnect: () -> Unit
+    onConnect: () -> Unit,
+    motor1Status: String,
+    motor2Status: String,
+    lastResponse: String,
+    onMotorCommand: (Int, Int) -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = TestTab.entries
@@ -237,6 +306,17 @@ fun MainScreen(
                         isConnected = isConnected,
                         onLedOn = onLedOn,
                         onLedOff = onLedOff,
+                        onConnect = onConnect
+                    )
+                }
+                TestTab.MOTOR_CONTROL -> {
+                    MotorControlScreen(
+                        connectionStatus = connectionStatus,
+                        isConnected = isConnected,
+                        motor1Status = motor1Status,
+                        motor2Status = motor2Status,
+                        lastResponse = lastResponse,
+                        onMotorCommand = onMotorCommand,
                         onConnect = onConnect
                     )
                 }
