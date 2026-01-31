@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Arduino Uno, Mega, etc. (Official Arduino) -->
+    <usb-device vendor-id="9025" />
+    <!-- Arduino Leonardo, Micro (CDC ACM) -->
+    <usb-device vendor-id="9025" product-id="32822" />
+    <!-- Arduino Nano (CH340) -->
+    <usb-device vendor-id="6790" />
+    <!-- FTDI -->
+    <usb-device vendor-id="1027" />
+    <!-- Silicon Labs CP210x -->
+    <usb-device vendor-id="4292" />
+    <!-- Prolific PL2303 -->
+    <usb-device vendor-id="1659" />
+</resources>
