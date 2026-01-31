@@ -262,6 +262,8 @@ class MainActivity : ComponentActivity() {
         CoroutineScope(Dispatchers.IO).launch {
             usbMutex.withLock {
                 try {
+                    val port = usbSerialPort ?: return@withLock
+
                     val motorChar = motorId.toString()[0]
                     val cmdChar = command.toString()[0]
                     val speedByte = speed.toByte()
@@ -275,14 +277,36 @@ class MainActivity : ComponentActivity() {
                         checksum.code.toByte(),
                         '>'.code.toByte()
                     )
-                    usbSerialPort?.write(message, 1000)
+
+                    // 재시도 로직
+                    var success = false
+                    for (retry in 0..2) {
+                        try {
+                            port.write(message, 1000)
+                            success = true
+                            break
+                        } catch (e: Exception) {
+                            if (retry < 2) {
+                                delay(50)
+                            } else {
+                                throw e
+                            }
+                        }
+                    }
+
+                    if (!success) return@withLock
 
                     // 응답 대기
-                    delay(50)
+                    delay(30)
 
                     // 응답 읽기
                     val responseBuffer = ByteArray(20)
-                    val bytesRead = usbSerialPort?.read(responseBuffer, 500) ?: 0
+                    val bytesRead = try {
+                        port.read(responseBuffer, 200)
+                    } catch (e: Exception) {
+                        0
+                    }
+
                     if (bytesRead > 0) {
                         val response = String(responseBuffer, 0, bytesRead).trim()
                         lastResponse = response
@@ -301,12 +325,14 @@ class MainActivity : ComponentActivity() {
                                 4 -> motor4Status = statusText
                             }
                         }
-                    } else {
-                        lastResponse = "No response"
                     }
                 } catch (e: Exception) {
-                    connectionStatus = "전송 오류: ${e.message}"
-                    lastResponse = "Error: ${e.message}"
+                    lastResponse = "Error"
+                    // 연결 끊김 감지 시 상태 업데이트
+                    if (e.message?.contains("write") == true) {
+                        isConnected = false
+                        connectionStatus = "연결 끊김"
+                    }
                 }
             }
         }
