@@ -8,9 +8,11 @@
 
 #include <AFMotor.h>
 
-// M1, M2 포트에 연결된 DC 모터
+// M1~M4 포트에 연결된 DC 모터
 AF_DCMotor motor1(1);
 AF_DCMotor motor2(2);
+AF_DCMotor motor3(3);
+AF_DCMotor motor4(4);
 
 // 모터 속도 (0-255)
 const int MOTOR_SPEED = 255;
@@ -30,8 +32,12 @@ void setup() {
   // 모터 초기화
   motor1.setSpeed(MOTOR_SPEED);
   motor2.setSpeed(MOTOR_SPEED);
+  motor3.setSpeed(MOTOR_SPEED);
+  motor4.setSpeed(MOTOR_SPEED);
   motor1.run(RELEASE);
   motor2.run(RELEASE);
+  motor3.run(RELEASE);
+  motor4.run(RELEASE);
 
   Serial.println("<O00>");  // Ready
 }
@@ -72,7 +78,7 @@ void processCommand() {
   }
 
   // 모터ID 검증
-  if (motorId != '1' && motorId != '2') {
+  if (motorId < '1' || motorId > '4') {
     sendResponse('M', motorId, command);
     return;
   }
@@ -84,7 +90,13 @@ void processCommand() {
   }
 
   // 모터 선택
-  AF_DCMotor* motor = (motorId == '1') ? &motor1 : &motor2;
+  AF_DCMotor* motor;
+  switch (motorId) {
+    case '1': motor = &motor1; break;
+    case '2': motor = &motor2; break;
+    case '3': motor = &motor3; break;
+    case '4': motor = &motor4; break;
+  }
 
   // 명령 실행
   switch (command) {

@@ -52,6 +52,8 @@ class MainActivity : ComponentActivity() {
     private var isConnected by mutableStateOf(false)
     private var motor1Status by mutableStateOf("STOPPED")
     private var motor2Status by mutableStateOf("STOPPED")
+    private var motor3Status by mutableStateOf("STOPPED")
+    private var motor4Status by mutableStateOf("STOPPED")
     private var lastResponse by mutableStateOf("-")
 
     private val usbReceiver = object : BroadcastReceiver() {
@@ -112,6 +114,8 @@ class MainActivity : ComponentActivity() {
                     onConnect = { findAndConnectDevice() },
                     motor1Status = motor1Status,
                     motor2Status = motor2Status,
+                    motor3Status = motor3Status,
+                    motor4Status = motor4Status,
                     lastResponse = lastResponse,
                     onMotorCommand = { motorId, command -> sendMotorCommand(motorId, command) }
                 )
@@ -242,8 +246,12 @@ class MainActivity : ComponentActivity() {
                             2 -> "BACKWARD"
                             else -> "UNKNOWN"
                         }
-                        if (motorId == 1) motor1Status = statusText
-                        else motor2Status = statusText
+                        when (motorId) {
+                            1 -> motor1Status = statusText
+                            2 -> motor2Status = statusText
+                            3 -> motor3Status = statusText
+                            4 -> motor4Status = statusText
+                        }
                     }
                 } else {
                     lastResponse = "No response"
@@ -272,6 +280,8 @@ fun MainScreen(
     onConnect: () -> Unit,
     motor1Status: String,
     motor2Status: String,
+    motor3Status: String,
+    motor4Status: String,
     lastResponse: String,
     onMotorCommand: (Int, Int) -> Unit
 ) {
@@ -315,6 +325,8 @@ fun MainScreen(
                         isConnected = isConnected,
                         motor1Status = motor1Status,
                         motor2Status = motor2Status,
+                        motor3Status = motor3Status,
+                        motor4Status = motor4Status,
                         lastResponse = lastResponse,
                         onMotorCommand = onMotorCommand,
                         onConnect = onConnect

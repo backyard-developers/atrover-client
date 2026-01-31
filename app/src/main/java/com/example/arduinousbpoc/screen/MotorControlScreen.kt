@@ -31,6 +31,8 @@ fun MotorControlScreen(
     isConnected: Boolean,
     motor1Status: String,
     motor2Status: String,
+    motor3Status: String,
+    motor4Status: String,
     lastResponse: String,
     onMotorCommand: (motorId: Int, command: Int) -> Unit,
     onConnect: () -> Unit,
@@ -48,7 +50,7 @@ fun MotorControlScreen(
             fontWeight = FontWeight.Bold
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Motor 1 Card
         MotorCard(
@@ -60,7 +62,7 @@ fun MotorControlScreen(
             onForward = { onMotorCommand(1, 1) }
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         // Motor 2 Card
         MotorCard(
@@ -72,7 +74,31 @@ fun MotorControlScreen(
             onForward = { onMotorCommand(2, 1) }
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Motor 3 Card
+        MotorCard(
+            motorName = "MOTOR 3",
+            status = motor3Status,
+            isConnected = isConnected,
+            onReverse = { onMotorCommand(3, 2) },
+            onStop = { onMotorCommand(3, 0) },
+            onForward = { onMotorCommand(3, 1) }
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Motor 4 Card
+        MotorCard(
+            motorName = "MOTOR 4",
+            status = motor4Status,
+            isConnected = isConnected,
+            onReverse = { onMotorCommand(4, 2) },
+            onStop = { onMotorCommand(4, 0) },
+            onForward = { onMotorCommand(4, 1) }
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         // Status Card
         Card(
