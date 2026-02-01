@@ -1,6 +1,7 @@
 package com.example.arduinousbpoc
 
 import android.app.PendingIntent
+import android.util.Log
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -54,6 +55,7 @@ import kotlinx.coroutines.sync.withLock
 class MainActivity : ComponentActivity() {
 
     companion object {
+        private const val TAG = "ATRover"
         private const val ACTION_USB_PERMISSION = "com.example.arduinousbpoc.USB_PERMISSION"
     }
 
@@ -246,6 +248,7 @@ class MainActivity : ComponentActivity() {
         val speedValue = ((command.speed ?: 50) * 2.55).toInt().coerceIn(0, 255)
         val lm = leftMotor
         val rm = rightMotor
+        Log.d(TAG, "handleRoverCommand: action=${command.action}, direction=${command.direction}, speed=${command.speed}→$speedValue, leftMotor=M$lm, rightMotor=M$rm")
 
         when (lm) {
             1 -> motor1Speed = speedValue
@@ -277,17 +280,18 @@ class MainActivity : ComponentActivity() {
             else -> return
         }
 
+        val cmdDesc = cmds.joinToString(", ") { (m, c) ->
+            val dir = when(c) { 0 -> "STOP"; 1 -> "FWD"; 2 -> "BWD"; else -> "?$c" }
+            "M$m→$dir"
+        }
+        Log.d(TAG, "handleRoverCommand: sending [$cmdDesc] speed=$speedValue")
         sendMotorCommands(cmds)
     }
 
     /**
-     * Send multi-motor command as a single packet.
-     * Protocol: <M[n][cmd1]...[cmdn][speed][checksum]>
-     * Response: <O[n]M> (success) or <E[n]M> (failure)
-     *
-     * Motor mapping:
-     *   n=2: cmd1→motor3(left), cmd2→motor4(right)
-     *   n=4: cmd1→motor1, cmd2→motor2, cmd3→motor3, cmd4→motor4
+     * Send direct motor command with explicit motor IDs and per-motor speed.
+     * Protocol: <D[n][id1][cmd1][spd1]...[idn][cmdn][spdn][checksum]>
+     * Response: <O[n]D> (success) or <E[n]D> (failure)
      */
     private fun sendMotorCommands(commands: List<Pair<Int, Int>>) {
         if (!isConnected || usbSerialPort == null || commands.isEmpty()) return
@@ -302,14 +306,12 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Determine motor count and ordered commands
-        // Sort by motor mapping order for the protocol
         val sortedCmds = commands.sortedBy { it.first }
         val n = sortedCmds.size
         if (n < 2 || n > 4) return
 
-        // Use first motor's speed as common speed (all should be same from handleRoverCommand)
-        val speed = when (sortedCmds[0].first) {
+        // Per-motor speed lookup
+        fun getSpeed(motorId: Int): Int = when (motorId) {
             1 -> motor1Speed; 2 -> motor2Speed
             3 -> motor3Speed; 4 -> motor4Speed
             else -> 255
@@ -320,29 +322,39 @@ class MainActivity : ComponentActivity() {
                 try {
                     val port = usbSerialPort ?: return@withLock
 
-                    // Build multi-motor packet: <M[n][cmd1]...[cmdn][speed][checksum]>
+                    // Build direct packet: <D[n][id1][cmd1][spd1]...[idn][cmdn][spdn][checksum]>
                     val nChar = n.toString()[0]
-                    val cmdChars = sortedCmds.map { it.second.toString()[0] }
 
-                    // Checksum: 'M' ^ n ^ cmd1 ^ ... ^ cmdn ^ speed
-                    var checksum = 'M'.code xor nChar.code
-                    for (cmdChar in cmdChars) {
-                        checksum = checksum xor cmdChar.code
+                    // Checksum: D ^ n ^ id1 ^ cmd1 ^ spd1 ^ ... ^ idn ^ cmdn ^ spdn
+                    var checksum = 'D'.code xor nChar.code
+                    for ((motorId, cmd) in sortedCmds) {
+                        val spd = getSpeed(motorId)
+                        checksum = checksum xor motorId.toString()[0].code
+                        checksum = checksum xor cmd.toString()[0].code
+                        checksum = checksum xor spd
                     }
-                    checksum = checksum xor speed
 
-                    // Assemble packet: STX + M + n + cmds... + speed + checksum + ETX
-                    val message = ByteArray(6 + n)
+                    // Assemble: STX + D + n + (id+cmd+spd)*n + checksum + ETX
+                    val message = ByteArray(3 + n * 3 + 2)  // 1(STX)+1(D)+1(n) + n*3 + 1(chk)+1(ETX)
                     message[0] = '<'.code.toByte()
-                    message[1] = 'M'.code.toByte()
+                    message[1] = 'D'.code.toByte()
                     message[2] = nChar.code.toByte()
-                    for (i in cmdChars.indices) {
-                        message[3 + i] = cmdChars[i].code.toByte()
+                    for (i in sortedCmds.indices) {
+                        val spd = getSpeed(sortedCmds[i].first)
+                        message[3 + i * 3] = sortedCmds[i].first.toString()[0].code.toByte()
+                        message[4 + i * 3] = sortedCmds[i].second.toString()[0].code.toByte()
+                        message[5 + i * 3] = spd.toByte()
                     }
-                    message[3 + n] = speed.toByte()
-                    message[4 + n] = checksum.toByte()
-                    message[5 + n] = '>'.code.toByte()
+                    message[3 + n * 3] = checksum.toByte()
+                    message[4 + n * 3] = '>'.code.toByte()
 
+                    val hexStr = message.joinToString(" ") { "%02X".format(it) }
+                    val cmdDesc = sortedCmds.joinToString(", ") { (m, c) ->
+                        val spd = getSpeed(m)
+                        val dir = when(c) { 0 -> "STOP"; 1 -> "FWD"; 2 -> "BWD"; else -> "?$c" }
+                        "M$m→$dir@$spd"
+                    }
+                    Log.d(TAG, "USB TX (direct): [$cmdDesc] packet=[$hexStr] (${message.size} bytes)")
                     port.write(message, 1000)
 
                     // Read response
@@ -354,6 +366,8 @@ class MainActivity : ComponentActivity() {
 
                     if (bytesRead > 0) {
                         val response = String(responseBuffer, 0, bytesRead).trim()
+                        val rxHex = responseBuffer.take(bytesRead).joinToString(" ") { "%02X".format(it) }
+                        Log.d(TAG, "USB RX (direct): \"$response\" hex=[$rxHex] ($bytesRead bytes)")
                         lastResponse = response
 
                         if (response.contains("O")) {
@@ -369,9 +383,15 @@ class MainActivity : ComponentActivity() {
                                     4 -> motor4Status = statusText
                                 }
                             }
+                            Log.d(TAG, "USB RX (direct): OK - motors updated")
+                        } else {
+                            Log.w(TAG, "USB RX (direct): unexpected response \"$response\"")
                         }
+                    } else {
+                        Log.w(TAG, "USB RX (direct): no response from Arduino")
                     }
                 } catch (e: Exception) {
+                    Log.e(TAG, "USB TX (direct) error: ${e.message}")
                     lastResponse = "Error"
                     if (e.message?.contains("write") == true) {
                         isConnected = false
@@ -508,6 +528,10 @@ class MainActivity : ComponentActivity() {
                         '>'.code.toByte()
                     )
 
+                    val dir = when(command) { 0 -> "STOP"; 1 -> "FWD"; 2 -> "BWD"; else -> "?$command" }
+                    val hexStr = message.joinToString(" ") { "%02X".format(it) }
+                    Log.d(TAG, "USB TX (single): M$motorId→$dir speed=$speed packet=[$hexStr] (${message.size} bytes)")
+
                     // 재시도 로직
                     var success = false
                     for (retry in 0..2) {
@@ -516,6 +540,7 @@ class MainActivity : ComponentActivity() {
                             success = true
                             break
                         } catch (e: Exception) {
+                            Log.w(TAG, "USB TX (single): retry $retry failed: ${e.message}")
                             if (retry < 2) {
                                 delay(50)
                             } else {
@@ -539,6 +564,8 @@ class MainActivity : ComponentActivity() {
 
                     if (bytesRead > 0) {
                         val response = String(responseBuffer, 0, bytesRead).trim()
+                        val rxHex = responseBuffer.take(bytesRead).joinToString(" ") { "%02X".format(it) }
+                        Log.d(TAG, "USB RX (single): M$motorId \"$response\" hex=[$rxHex] ($bytesRead bytes)")
                         lastResponse = response
 
                         if (response.contains("O")) {
@@ -554,9 +581,15 @@ class MainActivity : ComponentActivity() {
                                 3 -> motor3Status = statusText
                                 4 -> motor4Status = statusText
                             }
+                            Log.d(TAG, "USB RX (single): M$motorId OK → $statusText")
+                        } else {
+                            Log.w(TAG, "USB RX (single): M$motorId unexpected \"$response\"")
                         }
+                    } else {
+                        Log.w(TAG, "USB RX (single): M$motorId no response")
                     }
                 } catch (e: Exception) {
+                    Log.e(TAG, "USB TX (single) error: M$motorId ${e.message}")
                     lastResponse = "Error"
                     // 연결 끊김 감지 시 상태 업데이트
                     if (e.message?.contains("write") == true) {

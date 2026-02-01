@@ -7,6 +7,9 @@
  *
  * 멀티모터 프로토콜: <M[n][cmd1]...[cmdn][속도][체크섬]>
  * 멀티 응답: <O[n]M> (성공) 또는 <E[n]M> (실패)
+ *
+ * 다이렉트 프로토콜: <D[n][id1][cmd1][spd1]...[idn][cmdn][spdn][체크섬]>
+ * 다이렉트 응답: <O[n]D> (성공) 또는 <E[n]D> (실패)
  */
 
 #include <AFMotor.h>
@@ -21,8 +24,8 @@ AF_DCMotor motor4(4);
 const char STX = '<';
 const char ETX = '>';
 
-// 버퍼 (멀티모터 최대: M + n + 4cmd + speed + checksum = 8)
-char buffer[8];
+// 버퍼 (다이렉트 최대: D + n + 4*(id+cmd+spd) + checksum = 15)
+char buffer[16];
 int bufferIndex = 0;
 bool receiving = false;
 
@@ -50,13 +53,19 @@ void loop() {
       // 메시지 끝
       receiving = false;
       processCommand();
-    } else if (receiving && bufferIndex < 7) {
+    } else if (receiving && bufferIndex < 15) {
       buffer[bufferIndex++] = c;
     }
   }
 }
 
 void processCommand() {
+  // 다이렉트 모터 명령 분기
+  if (bufferIndex >= 6 && buffer[0] == 'D') {
+    processDirectMotorCommand();
+    return;
+  }
+
   // 멀티모터 명령 분기
   if (bufferIndex >= 5 && buffer[0] == 'M') {
     processMultiMotorCommand();
@@ -179,6 +188,79 @@ void processMultiMotorCommand() {
   }
 
   sendMultiResponse('O', n);
+}
+
+void processDirectMotorCommand() {
+  // 버퍼: D(0) n(1) [id1(2) cmd1(3) spd1(4)] ... [idn cmdn spdn] checksum
+  char n = buffer[1];
+  int motorCount = n - '0';
+
+  if (motorCount < 2 || motorCount > 4) {
+    sendDirectResponse('E', n);
+    return;
+  }
+
+  // 예상 버퍼 길이: 1(D) + 1(n) + motorCount*3(id+cmd+spd) + 1(checksum)
+  int expectedLen = 2 + motorCount * 3 + 1;
+  if (bufferIndex != expectedLen) {
+    sendDirectResponse('E', n);
+    return;
+  }
+
+  // 체크섬 검증: D ^ n ^ id1 ^ cmd1 ^ spd1 ^ ... ^ idn ^ cmdn ^ spdn
+  char checksum = buffer[2 + motorCount * 3];
+
+  char expected = 'D' ^ n;
+  for (int i = 0; i < motorCount * 3; i++) {
+    expected ^= buffer[2 + i];
+  }
+
+  if (checksum != expected) {
+    sendDirectResponse('E', n);
+    return;
+  }
+
+  // ID와 명령 검증
+  for (int i = 0; i < motorCount; i++) {
+    char id = buffer[2 + i * 3];
+    char cmd = buffer[3 + i * 3];
+
+    if (id < '1' || id > '4') {
+      sendDirectResponse('E', n);
+      return;
+    }
+    if (cmd != '0' && cmd != '1' && cmd != '2') {
+      sendDirectResponse('E', n);
+      return;
+    }
+  }
+
+  // 모터 실행
+  AF_DCMotor* motorPtrs[] = { &motor1, &motor2, &motor3, &motor4 };
+
+  for (int i = 0; i < motorCount; i++) {
+    char id = buffer[2 + i * 3];
+    char cmd = buffer[3 + i * 3];
+    uint8_t spd = (uint8_t)buffer[4 + i * 3];
+    int idx = id - '1';
+
+    motorPtrs[idx]->setSpeed(spd);
+    switch (cmd) {
+      case '0': motorPtrs[idx]->run(RELEASE);  break;
+      case '1': motorPtrs[idx]->run(FORWARD);  break;
+      case '2': motorPtrs[idx]->run(BACKWARD); break;
+    }
+  }
+
+  sendDirectResponse('O', n);
+}
+
+void sendDirectResponse(char status, char n) {
+  Serial.print(STX);
+  Serial.print(status);
+  Serial.print(n);
+  Serial.print('D');
+  Serial.println(ETX);
 }
 
 void sendMultiResponse(char status, char n) {

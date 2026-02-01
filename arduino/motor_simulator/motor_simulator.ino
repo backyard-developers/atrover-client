@@ -39,7 +39,7 @@ Adafruit_TFTLCD tft(LCD_CS, LCD_CD, LCD_WR, LCD_RD, LCD_RESET);
 // 시리얼 프로토콜 정의
 const char STX = '<';
 const char ETX = '>';
-const int BUFFER_SIZE = 8;
+const int BUFFER_SIZE = 16;
 
 char buffer[BUFFER_SIZE];
 int bufferIndex = 0;
@@ -81,6 +81,17 @@ void sendMultiResponse(char status, char count) {
   Serial.print(status);
   Serial.print(count);
   Serial.print('M');
+  Serial.println(ETX);
+}
+
+/**
+ * 응답 전송 함수 (다이렉트 모터)
+ */
+void sendDirectResponse(char status, char count) {
+  Serial.print(STX);
+  Serial.print(status);
+  Serial.print(count);
+  Serial.print('D');
   Serial.println(ETX);
 }
 
@@ -304,6 +315,79 @@ void processMultiMotorCommand() {
 }
 
 /**
+ * 다이렉트 모터 명령 처리
+ * 프로토콜: <D[n][id1][cmd1][spd1]...[idn][cmdn][spdn][checksum]>
+ */
+void processDirectMotorCommand() {
+  if (bufferIndex < 6) { // 최소: D + n + id1 + cmd1 + spd1 + checksum
+    sendDirectResponse('E', '0');
+    drawStatus("ERR:DLEN");
+    return;
+  }
+
+  char nChar = buffer[1];
+  int n = nChar - '0';
+  if (n < 2 || n > 4) {
+    sendDirectResponse('E', nChar);
+    drawStatus("ERR:DCNT");
+    return;
+  }
+
+  // 예상 길이: D(1) + n(1) + n*3(id+cmd+spd) + checksum(1) = 2 + n*3 + 1
+  int expectedLen = 2 + n * 3 + 1;
+  if (bufferIndex != expectedLen) {
+    sendDirectResponse('E', nChar);
+    drawStatus("ERR:DLEN");
+    return;
+  }
+
+  uint8_t checksum = (uint8_t)buffer[2 + n * 3];
+
+  // 체크섬 계산: D ^ n ^ id1 ^ cmd1 ^ spd1 ^ ... ^ idn ^ cmdn ^ spdn
+  uint8_t calculatedChecksum = 'D' ^ nChar;
+  for (int i = 0; i < n * 3; i++) {
+    calculatedChecksum ^= buffer[2 + i];
+  }
+
+  if (checksum != calculatedChecksum) {
+    sendDirectResponse('E', nChar);
+    drawStatus("ERR:DCHK");
+    return;
+  }
+
+  // ID와 명령 검증
+  for (int i = 0; i < n; i++) {
+    char id = buffer[2 + i * 3];
+    char cmd = buffer[3 + i * 3];
+    if (id < '1' || id > '4') {
+      sendDirectResponse('E', nChar);
+      drawStatus("ERR:DID");
+      return;
+    }
+    if (cmd < '0' || cmd > '2') {
+      sendDirectResponse('E', nChar);
+      drawStatus("ERR:DCMD");
+      return;
+    }
+  }
+
+  // 모터 업데이트 (개별 속도)
+  for (int i = 0; i < n; i++) {
+    char id = buffer[2 + i * 3];
+    char cmd = buffer[3 + i * 3];
+    uint8_t spd = (uint8_t)buffer[4 + i * 3];
+    int motorIndex = id - '1';
+    updateMotor(motorIndex, cmd - '0', spd);
+  }
+
+  // 성공 응답
+  sendDirectResponse('O', nChar);
+  String statusMsg = "OK:D";
+  statusMsg += nChar;
+  drawStatus(statusMsg);
+}
+
+/**
  * 초기 화면 그리기
  */
 void drawInitialScreen() {
@@ -360,7 +444,10 @@ void loop() {
         receiving = false;
 
         if (bufferIndex > 0) {
-          if (buffer[0] == 'M') {
+          if (buffer[0] == 'D') {
+            // 다이렉트 모터 명령
+            processDirectMotorCommand();
+          } else if (buffer[0] == 'M') {
             // 멀티 모터 명령
             processMultiMotorCommand();
           } else {
