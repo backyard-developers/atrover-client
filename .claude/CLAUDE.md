@@ -15,10 +15,12 @@ JAVA_HOME="/c/Program Files/Android/Android Studio/jbr" ./gradlew assembleDebug
 
 ### Android 앱
 - `app/src/main/java/com/example/arduinousbpoc/`
-  - `MainActivity.kt` - 탭 네비게이션
-  - `screen/LedControlScreen.kt` - USB 시리얼 LED 제어
-  - `screen/CameraPreviewScreen.kt` - 카메라 프리뷰
+  - `MainActivity.kt` - wiring only (네트워크+USB 연결)
+  - `usb/UsbMotorController.kt` - USB 시리얼 + 모터 제어
+  - `screen/MainScreen.kt` - 탭 네비게이션 (모터, 스트리밍, 원격)
+  - `screen/MotorControlScreen.kt` - 모터 제어 UI
   - `screen/CameraStreamScreen.kt` - WebRTC 스트리밍
+  - `screen/RemoteControlScreen.kt` - 원격 제어 (Backend 연동)
 
 ### Node.js 서버
 - `server/` - WebRTC 시그널링 서버
