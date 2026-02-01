@@ -32,6 +32,7 @@ import com.example.arduinousbpoc.network.BackendConfig
 import com.example.arduinousbpoc.network.CommandSocketManager
 import com.example.arduinousbpoc.network.ConnectionState
 import com.example.arduinousbpoc.network.MediaSocketManager
+import com.example.arduinousbpoc.network.MotorMapping
 import com.example.arduinousbpoc.network.RoverCommand
 import com.example.arduinousbpoc.network.StreamingState
 import com.example.arduinousbpoc.screen.CameraPreviewScreen
@@ -75,6 +76,11 @@ class MainActivity : ComponentActivity() {
     private var lastResponse by mutableStateOf("-")
     private val usbMutex = Mutex()
 
+    // Motor config
+    private lateinit var motorConfigPrefs: MotorConfigPreferences
+    private var leftMotor by mutableStateOf(3)
+    private var rightMotor by mutableStateOf(4)
+
     // Backend managers
     private lateinit var commandSocketManager: CommandSocketManager
     private lateinit var mediaSocketManager: MediaSocketManager
@@ -115,9 +121,19 @@ class MainActivity : ComponentActivity() {
 
         usbManager = getSystemService(USB_SERVICE) as UsbManager
 
+        // Initialize motor config
+        motorConfigPrefs = MotorConfigPreferences(this)
+        leftMotor = motorConfigPrefs.getLeftMotor()
+        rightMotor = motorConfigPrefs.getRightMotor()
+
         // Initialize backend managers
         commandSocketManager = CommandSocketManager(
-            onCommandReceived = { command -> handleRoverCommand(command) }
+            onCommandReceived = { command -> handleRoverCommand(command) },
+            onMotorConfigReceived = { mapping ->
+                leftMotor = mapping.left
+                rightMotor = mapping.right
+                motorConfigPrefs.save(mapping.left, mapping.right)
+            }
         )
         mediaSocketManager = MediaSocketManager()
 
@@ -199,7 +215,15 @@ class MainActivity : ComponentActivity() {
                     onStopStreaming = {
                         mediaSocketManager.stopStreaming()
                     },
-                    errorLog = listOfNotNull(cmdError, mediaError).joinToString("\n")
+                    errorLog = listOfNotNull(cmdError, mediaError).joinToString("\n"),
+                    leftMotor = leftMotor,
+                    rightMotor = rightMotor,
+                    onMotorConfigChange = { left, right ->
+                        leftMotor = left
+                        rightMotor = right
+                        motorConfigPrefs.save(left, right)
+                        commandSocketManager.sendMotorConfig(MotorMapping(left, right))
+                    }
                 )
             }
         }
@@ -215,35 +239,40 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Convert backend RoverCommand to USB motor commands.
-     * Motor layout (4WD):
-     *   Motor 1,3 = left side
-     *   Motor 2,4 = right side
-     * Command: 0=stop, 1=forward, 2=backward
-     */
-    /**
-     * Convert backend RoverCommand to USB motor commands.
-     * 2WD layout: Motor 3 = left, Motor 4 = right
+     * 2WD layout: uses configurable leftMotor/rightMotor assignment.
      * Command: 0=stop, 1=forward, 2=backward
      */
     private fun handleRoverCommand(command: RoverCommand) {
         val speedValue = ((command.speed ?: 50) * 2.55).toInt().coerceIn(0, 255)
+        val lm = leftMotor
+        val rm = rightMotor
 
-        motor3Speed = speedValue
-        motor4Speed = speedValue
+        when (lm) {
+            1 -> motor1Speed = speedValue
+            2 -> motor2Speed = speedValue
+            3 -> motor3Speed = speedValue
+            4 -> motor4Speed = speedValue
+        }
+        when (rm) {
+            1 -> motor1Speed = speedValue
+            2 -> motor2Speed = speedValue
+            3 -> motor3Speed = speedValue
+            4 -> motor4Speed = speedValue
+        }
 
         val cmds: List<Pair<Int, Int>> = when (command.action) {
             "move" -> when (command.direction) {
-                "forward" -> listOf(3 to 1, 4 to 1)
-                "backward" -> listOf(3 to 2, 4 to 2)
-                "left" -> listOf(3 to 2, 4 to 1)
-                "right" -> listOf(3 to 1, 4 to 2)
+                "forward" -> listOf(lm to 1, rm to 1)
+                "backward" -> listOf(lm to 2, rm to 2)
+                "left" -> listOf(lm to 2, rm to 1)
+                "right" -> listOf(lm to 1, rm to 2)
                 else -> return
             }
-            "stop", "calibrate" -> listOf(3 to 0, 4 to 0)
+            "stop", "calibrate" -> listOf(lm to 0, rm to 0)
             "rotate" -> {
                 val degrees = command.degrees ?: 90
-                if (degrees > 0) listOf(3 to 1, 4 to 2)
-                else listOf(3 to 2, 4 to 1)
+                if (degrees > 0) listOf(lm to 1, rm to 2)
+                else listOf(lm to 2, rm to 1)
             }
             else -> return
         }
@@ -576,7 +605,10 @@ fun MainScreen(
     onBackendDisconnect: () -> Unit,
     onStartStreaming: () -> Unit,
     onStopStreaming: () -> Unit,
-    errorLog: String
+    errorLog: String,
+    leftMotor: Int = 3,
+    rightMotor: Int = 4,
+    onMotorConfigChange: (Int, Int) -> Unit = { _, _ -> }
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = TestTab.entries
@@ -649,7 +681,10 @@ fun MainScreen(
                         onDisconnect = onBackendDisconnect,
                         onStartStreaming = onStartStreaming,
                         onStopStreaming = onStopStreaming,
-                        errorLog = errorLog
+                        errorLog = errorLog,
+                        leftMotor = leftMotor,
+                        rightMotor = rightMotor,
+                        onMotorConfigChange = onMotorConfigChange
                     )
                 }
             }

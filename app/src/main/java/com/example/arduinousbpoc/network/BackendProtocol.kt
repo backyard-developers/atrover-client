@@ -81,6 +81,27 @@ data class StopStreamMessage(
     val type: String = "stop_stream"
 )
 
+// --- Motor Config Messages ---
+
+@Serializable
+data class MotorMapping(
+    val left: Int = 3,
+    val right: Int = 4
+)
+
+@Serializable
+data class MotorConfigMessage(
+    val type: String = "motor_config",
+    val mapping: MotorMapping
+)
+
+@Serializable
+data class MotorConfigUpdateMessage(
+    val type: String = "motor_config_update",
+    val roverId: String,
+    val mapping: MotorMapping
+)
+
 // --- Generic envelope for parsing incoming type field ---
 
 @Serializable

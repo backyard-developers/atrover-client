@@ -16,7 +16,8 @@ enum class ConnectionState {
 }
 
 class CommandSocketManager(
-    private val onCommandReceived: (RoverCommand) -> Unit
+    private val onCommandReceived: (RoverCommand) -> Unit,
+    private val onMotorConfigReceived: ((MotorMapping) -> Unit)? = null
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -31,6 +32,9 @@ class CommandSocketManager(
 
     private val _errorLog = MutableStateFlow<String?>(null)
     val errorLog: StateFlow<String?> = _errorLog
+
+    private val _motorMapping = MutableStateFlow(MotorMapping())
+    val motorMapping: StateFlow<MotorMapping> = _motorMapping
 
     private var webSocket: WebSocket? = null
     private var heartbeatJob: Job? = null
@@ -132,6 +136,15 @@ class CommandSocketManager(
                     _lastCommand.value = "${cmd.action} ${cmd.direction ?: ""}"
                     onCommandReceived(cmd)
                 }
+                "motor_config" -> {
+                    val msg = backendJson.decodeFromString(MotorConfigMessage.serializer(), text)
+                    _motorMapping.value = msg.mapping
+                    onMotorConfigReceived?.invoke(msg.mapping)
+                    Log.d(TAG, "Motor config received: left=${msg.mapping.left}, right=${msg.mapping.right}")
+                }
+                "motor_config_ack" -> {
+                    Log.d(TAG, "Motor config ack received")
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing message: $text", e)
@@ -179,6 +192,17 @@ class CommandSocketManager(
             TelemetryMessage(roverId = id, data = data)
         )
         webSocket?.send(msg)
+    }
+
+    fun sendMotorConfig(mapping: MotorMapping) {
+        val id = _roverId.value ?: return
+        val msg = backendJson.encodeToString(
+            MotorConfigUpdateMessage.serializer(),
+            MotorConfigUpdateMessage(roverId = id, mapping = mapping)
+        )
+        webSocket?.send(msg)
+        _motorMapping.value = mapping
+        Log.d(TAG, "Sent motor config: left=${mapping.left}, right=${mapping.right}")
     }
 
     fun disconnect() {

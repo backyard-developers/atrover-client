@@ -22,6 +22,7 @@ import androidx.core.content.ContextCompat
 import com.example.arduinousbpoc.network.ConnectionState
 import com.example.arduinousbpoc.network.StreamingState
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RemoteControlScreen(
     commandConnectionState: ConnectionState,
@@ -36,6 +37,9 @@ fun RemoteControlScreen(
     onStartStreaming: () -> Unit,
     onStopStreaming: () -> Unit,
     errorLog: String = "",
+    leftMotor: Int = 3,
+    rightMotor: Int = 4,
+    onMotorConfigChange: (Int, Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var serverIp by remember { mutableStateOf("192.168.0.2") }
@@ -208,6 +212,15 @@ fun RemoteControlScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // --- Motor Assignment ---
+        MotorAssignmentSection(
+            leftMotor = leftMotor,
+            rightMotor = rightMotor,
+            onMotorConfigChange = onMotorConfigChange
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         // --- Camera streaming toggle ---
         Text("카메라 스트리밍", style = MaterialTheme.typography.titleSmall)
         Spacer(modifier = Modifier.height(8.dp))
@@ -238,6 +251,123 @@ fun RemoteControlScreen(
             ) {
                 Text("스트리밍 중지")
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MotorAssignmentSection(
+    leftMotor: Int,
+    rightMotor: Int,
+    onMotorConfigChange: (Int, Int) -> Unit
+) {
+    val motorOptions = listOf(1, 2, 3, 4)
+    var selectedLeft by remember(leftMotor) { mutableStateOf(leftMotor) }
+    var selectedRight by remember(rightMotor) { mutableStateOf(rightMotor) }
+    var leftExpanded by remember { mutableStateOf(false) }
+    var rightExpanded by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                MaterialTheme.colorScheme.surfaceVariant,
+                RoundedCornerShape(8.dp)
+            )
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("모터 할당", style = MaterialTheme.typography.titleSmall)
+        Text(
+            text = "현재: Left=Motor $leftMotor, Right=Motor $rightMotor",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFF8b949e)
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Left motor dropdown
+            ExposedDropdownMenuBox(
+                expanded = leftExpanded,
+                onExpandedChange = { leftExpanded = it },
+                modifier = Modifier.weight(1f)
+            ) {
+                OutlinedTextField(
+                    value = "Motor $selectedLeft",
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Left") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = leftExpanded) },
+                    modifier = Modifier.menuAnchor(),
+                    singleLine = true
+                )
+                ExposedDropdownMenu(
+                    expanded = leftExpanded,
+                    onDismissRequest = { leftExpanded = false }
+                ) {
+                    motorOptions.forEach { motor ->
+                        DropdownMenuItem(
+                            text = { Text("Motor $motor") },
+                            onClick = {
+                                selectedLeft = motor
+                                leftExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Right motor dropdown
+            ExposedDropdownMenuBox(
+                expanded = rightExpanded,
+                onExpandedChange = { rightExpanded = it },
+                modifier = Modifier.weight(1f)
+            ) {
+                OutlinedTextField(
+                    value = "Motor $selectedRight",
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Right") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = rightExpanded) },
+                    modifier = Modifier.menuAnchor(),
+                    singleLine = true
+                )
+                ExposedDropdownMenu(
+                    expanded = rightExpanded,
+                    onDismissRequest = { rightExpanded = false }
+                ) {
+                    motorOptions.forEach { motor ->
+                        DropdownMenuItem(
+                            text = { Text("Motor $motor") },
+                            onClick = {
+                                selectedRight = motor
+                                rightExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        val isDuplicate = selectedLeft == selectedRight
+        if (isDuplicate) {
+            Text(
+                text = "Left와 Right는 다른 모터여야 합니다",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFF44336)
+            )
+        }
+
+        Button(
+            onClick = { onMotorConfigChange(selectedLeft, selectedRight) },
+            enabled = !isDuplicate && (selectedLeft != leftMotor || selectedRight != rightMotor),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("적용")
         }
     }
 }
