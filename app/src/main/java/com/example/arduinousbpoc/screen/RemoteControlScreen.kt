@@ -42,7 +42,7 @@ fun RemoteControlScreen(
     onMotorConfigChange: (Int, Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
-    var serverIp by remember { mutableStateOf("192.168.0.2") }
+    var serverIp by remember { mutableStateOf("192.168.0.21") }
     var commandPort by remember { mutableStateOf("8080") }
     var mediaPort by remember { mutableStateOf("8081") }
     var roverName by remember { mutableStateOf("ATRover-Android") }

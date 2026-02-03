@@ -58,7 +58,7 @@ fun CameraStreamScreen(
 ) {
     val context = LocalContext.current
 
-    var serverIp by remember { mutableStateOf("192.168.1.110") }
+    var serverIp by remember { mutableStateOf("192.168.0.21") }
     var serverPort by remember { mutableStateOf("8080") }
     var wsStatus by remember { mutableStateOf("연결 안됨") }
     var rtcStatus by remember { mutableStateOf("대기 중") }

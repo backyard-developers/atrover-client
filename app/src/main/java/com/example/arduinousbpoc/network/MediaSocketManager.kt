@@ -252,7 +252,18 @@ class MediaSocketManager {
             jpegQuality,
             out
         )
-        return out.toByteArray()
+
+        val rotation = imageProxy.imageInfo.rotationDegrees
+        if (rotation == 0) return out.toByteArray()
+
+        val bitmap = android.graphics.BitmapFactory.decodeByteArray(out.toByteArray(), 0, out.size())
+        val matrix = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
+        val rotated = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        val rotatedOut = ByteArrayOutputStream()
+        rotated.compress(android.graphics.Bitmap.CompressFormat.JPEG, jpegQuality, rotatedOut)
+        bitmap.recycle()
+        rotated.recycle()
+        return rotatedOut.toByteArray()
     }
 
     fun stopStreaming() {
