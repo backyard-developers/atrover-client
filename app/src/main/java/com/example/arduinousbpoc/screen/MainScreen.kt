@@ -51,7 +51,9 @@ fun MainScreen(
     errorLog: String,
     leftMotor: Int = 3,
     rightMotor: Int = 4,
-    onMotorConfigChange: (Int, Int) -> Unit = { _, _ -> }
+    leftReversed: Boolean = false,
+    rightReversed: Boolean = false,
+    onMotorConfigChange: (Int, Int, Boolean, Boolean) -> Unit = { _, _, _, _ -> }
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = TestTab.entries
@@ -115,6 +117,8 @@ fun MainScreen(
                         errorLog = errorLog,
                         leftMotor = leftMotor,
                         rightMotor = rightMotor,
+                        leftReversed = leftReversed,
+                        rightReversed = rightReversed,
                         onMotorConfigChange = onMotorConfigChange
                     )
                 }

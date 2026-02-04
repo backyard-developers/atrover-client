@@ -12,10 +12,16 @@ class MotorConfigPreferences(context: Context) {
 
     fun getRightMotor(): Int = prefs.getInt("right_motor", 4)
 
-    fun save(left: Int, right: Int) {
+    fun getLeftReversed(): Boolean = prefs.getBoolean("left_reversed", false)
+
+    fun getRightReversed(): Boolean = prefs.getBoolean("right_reversed", false)
+
+    fun save(left: Int, right: Int, leftReversed: Boolean = false, rightReversed: Boolean = false) {
         prefs.edit()
             .putInt("left_motor", left)
             .putInt("right_motor", right)
+            .putBoolean("left_reversed", leftReversed)
+            .putBoolean("right_reversed", rightReversed)
             .apply()
     }
 }

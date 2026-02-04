@@ -35,6 +35,8 @@ class MainActivity : ComponentActivity() {
         motorConfigPrefs = MotorConfigPreferences(this)
         motorController.leftMotor = motorConfigPrefs.getLeftMotor()
         motorController.rightMotor = motorConfigPrefs.getRightMotor()
+        motorController.leftReversed = motorConfigPrefs.getLeftReversed()
+        motorController.rightReversed = motorConfigPrefs.getRightReversed()
 
         // Backend managers
         commandSocketManager = CommandSocketManager(
@@ -42,7 +44,9 @@ class MainActivity : ComponentActivity() {
             onMotorConfigReceived = { mapping ->
                 motorController.leftMotor = mapping.left
                 motorController.rightMotor = mapping.right
-                motorConfigPrefs.save(mapping.left, mapping.right)
+                motorController.leftReversed = mapping.leftReversed
+                motorController.rightReversed = mapping.rightReversed
+                motorConfigPrefs.save(mapping.left, mapping.right, mapping.leftReversed, mapping.rightReversed)
             }
         )
         mediaSocketManager = MediaSocketManager()
@@ -127,11 +131,15 @@ class MainActivity : ComponentActivity() {
                     errorLog = listOfNotNull(cmdError, mediaError).joinToString("\n"),
                     leftMotor = motorController.leftMotor,
                     rightMotor = motorController.rightMotor,
-                    onMotorConfigChange = { left, right ->
+                    leftReversed = motorController.leftReversed,
+                    rightReversed = motorController.rightReversed,
+                    onMotorConfigChange = { left, right, lRev, rRev ->
                         motorController.leftMotor = left
                         motorController.rightMotor = right
-                        motorConfigPrefs.save(left, right)
-                        commandSocketManager.sendMotorConfig(MotorMapping(left, right))
+                        motorController.leftReversed = lRev
+                        motorController.rightReversed = rRev
+                        motorConfigPrefs.save(left, right, lRev, rRev)
+                        commandSocketManager.sendMotorConfig(MotorMapping(left, right, lRev, rRev))
                     }
                 )
             }

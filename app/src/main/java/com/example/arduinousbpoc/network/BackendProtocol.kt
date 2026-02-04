@@ -86,7 +86,9 @@ data class StopStreamMessage(
 @Serializable
 data class MotorMapping(
     val left: Int = 3,
-    val right: Int = 4
+    val right: Int = 4,
+    val leftReversed: Boolean = false,
+    val rightReversed: Boolean = false
 )
 
 @Serializable

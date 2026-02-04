@@ -59,6 +59,8 @@ class UsbMotorController(private val context: Context) {
     // Motor config
     var leftMotor by mutableStateOf(3)
     var rightMotor by mutableStateOf(4)
+    var leftReversed by mutableStateOf(false)
+    var rightReversed by mutableStateOf(false)
 
     val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
@@ -269,16 +271,24 @@ class UsbMotorController(private val context: Context) {
         }
     }
 
+    private fun flipDirection(cmd: Int): Int = when (cmd) {
+        1 -> 2  // FORWARD → BACKWARD
+        2 -> 1  // BACKWARD → FORWARD
+        else -> cmd  // STOP stays STOP
+    }
+
     fun handleRoverCommand(command: RoverCommand) {
         val speedValue = ((command.speed ?: 50) * 2.55).toInt().coerceIn(0, 255)
         val lm = leftMotor
         val rm = rightMotor
-        Log.d(TAG, "handleRoverCommand: action=${command.action}, direction=${command.direction}, speed=${command.speed}→$speedValue, leftMotor=M$lm, rightMotor=M$rm")
+        val lRev = leftReversed
+        val rRev = rightReversed
+        Log.d(TAG, "handleRoverCommand: action=${command.action}, direction=${command.direction}, speed=${command.speed}→$speedValue, leftMotor=M$lm${if (lRev) "(Rev)" else ""}, rightMotor=M$rm${if (rRev) "(Rev)" else ""}")
 
         setSpeed(lm, speedValue)
         setSpeed(rm, speedValue)
 
-        val cmds: List<Pair<Int, Int>> = when (command.action) {
+        val rawCmds: List<Pair<Int, Int>> = when (command.action) {
             "move" -> when (command.direction) {
                 "forward" -> listOf(lm to 1, rm to 1)
                 "backward" -> listOf(lm to 2, rm to 2)
@@ -293,6 +303,16 @@ class UsbMotorController(private val context: Context) {
                 else listOf(lm to 2, rm to 1)
             }
             else -> return
+        }
+
+        // Apply direction reversal per motor
+        val cmds = rawCmds.map { (motorId, cmd) ->
+            val flipped = when (motorId) {
+                lm -> if (lRev) flipDirection(cmd) else cmd
+                rm -> if (rRev) flipDirection(cmd) else cmd
+                else -> cmd
+            }
+            motorId to flipped
         }
 
         val cmdDesc = cmds.joinToString(", ") { (m, c) ->

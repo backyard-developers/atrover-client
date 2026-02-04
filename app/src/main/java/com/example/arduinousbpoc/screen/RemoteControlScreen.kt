@@ -39,7 +39,9 @@ fun RemoteControlScreen(
     errorLog: String = "",
     leftMotor: Int = 3,
     rightMotor: Int = 4,
-    onMotorConfigChange: (Int, Int) -> Unit = { _, _ -> },
+    leftReversed: Boolean = false,
+    rightReversed: Boolean = false,
+    onMotorConfigChange: (Int, Int, Boolean, Boolean) -> Unit = { _, _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var serverIp by remember { mutableStateOf("192.168.0.21") }
@@ -216,6 +218,8 @@ fun RemoteControlScreen(
         MotorAssignmentSection(
             leftMotor = leftMotor,
             rightMotor = rightMotor,
+            leftReversed = leftReversed,
+            rightReversed = rightReversed,
             onMotorConfigChange = onMotorConfigChange
         )
 
@@ -260,11 +264,15 @@ fun RemoteControlScreen(
 private fun MotorAssignmentSection(
     leftMotor: Int,
     rightMotor: Int,
-    onMotorConfigChange: (Int, Int) -> Unit
+    leftReversed: Boolean,
+    rightReversed: Boolean,
+    onMotorConfigChange: (Int, Int, Boolean, Boolean) -> Unit
 ) {
     val motorOptions = listOf(1, 2, 3, 4)
     var selectedLeft by remember(leftMotor) { mutableStateOf(leftMotor) }
     var selectedRight by remember(rightMotor) { mutableStateOf(rightMotor) }
+    var selectedLeftReversed by remember(leftReversed) { mutableStateOf(leftReversed) }
+    var selectedRightReversed by remember(rightReversed) { mutableStateOf(rightReversed) }
     var leftExpanded by remember { mutableStateOf(false) }
     var rightExpanded by remember { mutableStateOf(false) }
 
@@ -280,7 +288,7 @@ private fun MotorAssignmentSection(
     ) {
         Text("모터 할당", style = MaterialTheme.typography.titleSmall)
         Text(
-            text = "현재: Left=Motor $leftMotor, Right=Motor $rightMotor",
+            text = "현재: Left=Motor $leftMotor${if (leftReversed) " (Rev)" else ""}, Right=Motor $rightMotor${if (rightReversed) " (Rev)" else ""}",
             style = MaterialTheme.typography.bodySmall,
             color = Color(0xFF8b949e)
         )
@@ -353,6 +361,34 @@ private fun MotorAssignmentSection(
             }
         }
 
+        // Direction reversal toggles
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Checkbox(
+                    checked = selectedLeftReversed,
+                    onCheckedChange = { selectedLeftReversed = it }
+                )
+                Text("Left 방향 반전", style = MaterialTheme.typography.bodySmall)
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Checkbox(
+                    checked = selectedRightReversed,
+                    onCheckedChange = { selectedRightReversed = it }
+                )
+                Text("Right 방향 반전", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
         val isDuplicate = selectedLeft == selectedRight
         if (isDuplicate) {
             Text(
@@ -362,9 +398,12 @@ private fun MotorAssignmentSection(
             )
         }
 
+        val hasChanges = selectedLeft != leftMotor || selectedRight != rightMotor
+            || selectedLeftReversed != leftReversed || selectedRightReversed != rightReversed
+
         Button(
-            onClick = { onMotorConfigChange(selectedLeft, selectedRight) },
-            enabled = !isDuplicate && (selectedLeft != leftMotor || selectedRight != rightMotor),
+            onClick = { onMotorConfigChange(selectedLeft, selectedRight, selectedLeftReversed, selectedRightReversed) },
+            enabled = !isDuplicate && hasChanges,
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("적용")

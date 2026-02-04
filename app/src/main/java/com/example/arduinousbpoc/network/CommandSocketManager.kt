@@ -140,7 +140,7 @@ class CommandSocketManager(
                     val msg = backendJson.decodeFromString(MotorConfigMessage.serializer(), text)
                     _motorMapping.value = msg.mapping
                     onMotorConfigReceived?.invoke(msg.mapping)
-                    Log.d(TAG, "Motor config received: left=${msg.mapping.left}, right=${msg.mapping.right}")
+                    Log.d(TAG, "Motor config received: left=${msg.mapping.left}${if (msg.mapping.leftReversed) "(Rev)" else ""}, right=${msg.mapping.right}${if (msg.mapping.rightReversed) "(Rev)" else ""}")
                 }
                 "motor_config_ack" -> {
                     Log.d(TAG, "Motor config ack received")
@@ -202,7 +202,7 @@ class CommandSocketManager(
         )
         webSocket?.send(msg)
         _motorMapping.value = mapping
-        Log.d(TAG, "Sent motor config: left=${mapping.left}, right=${mapping.right}")
+        Log.d(TAG, "Sent motor config: left=${mapping.left}${if (mapping.leftReversed) "(Rev)" else ""}, right=${mapping.right}${if (mapping.rightReversed) "(Rev)" else ""}")
     }
 
     fun disconnect() {
