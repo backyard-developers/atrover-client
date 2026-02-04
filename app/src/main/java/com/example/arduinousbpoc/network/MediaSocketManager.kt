@@ -1,9 +1,13 @@
 package com.example.arduinousbpoc.network
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -52,6 +56,15 @@ class MediaSocketManager {
     private var lastFrameTime = 0L
     private var jpegQuality = 50
     private val frameIntervalMs = 66L // ~15fps
+
+    // Audio capture
+    private var audioRecord: AudioRecord? = null
+    private var audioJob: Job? = null
+    private val audioSampleRate = 16000
+    private val audioChannelConfig = AudioFormat.CHANNEL_IN_MONO
+    private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+    private val audioBufferSize = AudioRecord.getMinBufferSize(audioSampleRate, audioChannelConfig, audioFormat)
+        .coerceAtLeast(1024 * 2) // at least 1024 samples (2 bytes each)
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -187,6 +200,8 @@ class MediaSocketManager {
                 )
                 _streamingState.value = StreamingState.Streaming
                 Log.d(TAG, "Camera streaming started")
+
+                startAudioCapture()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to bind camera", e)
                 _streamingState.value = StreamingState.Error
@@ -266,12 +281,65 @@ class MediaSocketManager {
         return rotatedOut.toByteArray()
     }
 
+    @SuppressLint("MissingPermission")
+    private fun startAudioCapture() {
+        try {
+            val recorder = AudioRecord(
+                MediaRecorder.AudioSource.MIC,
+                audioSampleRate,
+                audioChannelConfig,
+                audioFormat,
+                audioBufferSize
+            )
+            if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+                Log.e(TAG, "AudioRecord failed to initialize")
+                recorder.release()
+                return
+            }
+            audioRecord = recorder
+            recorder.startRecording()
+            Log.d(TAG, "Audio capture started")
+
+            audioJob = scope.launch(Dispatchers.IO) {
+                val buffer = ByteArray(1024 * 2) // 1024 samples * 2 bytes per sample
+                while (isActive) {
+                    val read = recorder.read(buffer, 0, buffer.size)
+                    if (read > 0 &&
+                        _streamingState.value == StreamingState.Streaming &&
+                        _connectionState.value == ConnectionState.Connected
+                    ) {
+                        val frame = ByteArray(1 + read)
+                        frame[0] = 0x02
+                        System.arraycopy(buffer, 0, frame, 1, read)
+                        webSocket?.send(frame.toByteString(0, frame.size))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start audio capture", e)
+        }
+    }
+
+    private fun stopAudioCapture() {
+        audioJob?.cancel()
+        audioJob = null
+        audioRecord?.let {
+            try {
+                it.stop()
+            } catch (_: Exception) {}
+            it.release()
+        }
+        audioRecord = null
+        Log.d(TAG, "Audio capture stopped")
+    }
+
     fun stopStreaming() {
+        stopAudioCapture()
         cameraProvider?.unbindAll()
         cameraProvider = null
         imageAnalysis = null
         _streamingState.value = StreamingState.Idle
-        Log.d(TAG, "Camera streaming stopped")
+        Log.d(TAG, "Streaming stopped")
     }
 
     fun disconnect() {

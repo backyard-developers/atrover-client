@@ -61,9 +61,19 @@ fun RemoteControlScreen(
             ) == PackageManager.PERMISSION_GRANTED
         )
     }
+    var hasAudioPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context, Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
     val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted -> hasCameraPermission = isGranted }
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        hasCameraPermission = permissions[Manifest.permission.CAMERA] ?: hasCameraPermission
+        hasAudioPermission = permissions[Manifest.permission.RECORD_AUDIO] ?: hasAudioPermission
+    }
 
     Column(
         modifier = modifier
@@ -235,8 +245,13 @@ fun RemoteControlScreen(
         ) {
             Button(
                 onClick = {
-                    if (!hasCameraPermission) {
-                        permissionLauncher.launch(Manifest.permission.CAMERA)
+                    if (!hasCameraPermission || !hasAudioPermission) {
+                        permissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.CAMERA,
+                                Manifest.permission.RECORD_AUDIO
+                            )
+                        )
                     } else {
                         onStartStreaming()
                     }
